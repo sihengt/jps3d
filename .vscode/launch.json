@@ -1,0 +1,117 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "ros2",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/${input:package}/${input:program}",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "${workspaceFolder}/.vscode/ros_gdb.sh",
+            "setupCommands": [
+                {
+                "description": "Enable pretty-printing for gdb",
+                "text": "-enable-pretty-printing",
+                "ignoreFailures": true
+                }
+            ],
+        },
+        {
+            "name": "tf",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/px4_gazebo_sim/gazebo_tf_processor",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "${workspaceFolder}/.vscode/ros_gdb.sh",
+            "setupCommands": [
+                {
+                "description": "Enable pretty-printing for gdb",
+                "text": "-enable-pretty-printing",
+                "ignoreFailures": true
+                }
+            ],
+        },
+        {
+            "name": "(gdb) Jazzy",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/${input:package}/${input:program}",
+            "args": [],
+            "stopAtEntry": true,
+            "cwd": "${workspaceFolder}",
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "${workspaceFolder}/.vscode/ros_gdb.sh",
+            "setupCommands": [
+                {
+                "description": "Enable pretty-printing for gdb",
+                "text": "-enable-pretty-printing",
+                "ignoreFailures": true
+                }
+            ],
+        },
+        {
+            "name": "pid_controller",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/attitude_pid/pid_controller",
+            "args": ["--ros-args", "--params-file", "${workspaceFolder}/src/attitude_pid/src/pid_controller/pid_params.yaml", "-p", "use_sim_time:=true"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "${workspaceFolder}/.vscode/ros_gdb.sh",
+            "setupCommands": [
+                {
+                "description": "Enable pretty-printing for gdb",
+                "text": "-enable-pretty-printing",
+                "ignoreFailures": true
+                }
+            ],
+        },
+        {
+            "name": "Launch Rviz with Plugin",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/opt/ros/jazzy/lib/rviz/rviz",
+            "args": ["-d", "${workspaceFolder}/src/occupancy_map_generator/rviz_cfg/${input:rvizconfig}"],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                "description": "Enable pretty-printing for gdb",
+                "text": "-enable-pretty-printing",
+                "ignoreFailures": true
+                }
+            ],
+        }
+    ],
+    "inputs": [
+        {
+            "id": "package",
+            "type": "promptString",
+            "description": "Package name"
+        },
+        {
+            "id": "program",
+            "type": "promptString",
+            "description": "Program name"
+        },
+        {
+            "id": "rvizconfig",
+            "type": "promptString",
+            "description": "rviz config"
+        }
+    ]
+}
