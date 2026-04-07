@@ -31,8 +31,7 @@ int main(int argc, char **argv)
     const Vec3f start(reader.start(0), reader.start(1), reader.start(2));
     const Vec3f goal(reader.goal(0), reader.goal(1), reader.goal(2));
 
-    std::unique_ptr<JPSPlanner3D> planner_ptr(
-        new JPSPlanner3D(true));       // Declare a planner
+    std::unique_ptr<JPSPlanner3D> planner_ptr = std::make_unique<JPSPlanner3D>(true); // Declare a planner
     planner_ptr->setMapUtil(map_util); // Set collision checking function
     planner_ptr->updateMap();
 
