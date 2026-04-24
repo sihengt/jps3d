@@ -7,7 +7,7 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-if(not CMAKE_BUILD_TYPE)
+if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
 
@@ -16,6 +16,10 @@ set(BUILD_SHARED_LIBS ON)
 find_package(Eigen3 REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 
 PKG_CHECK_MODULES(YAMLCPP REQUIRED yaml-cpp)
 if(YAMLCPP_FOUND)
@@ -39,7 +43,10 @@ add_executable(jps3d_node src/jps3d_node.cpp)
 target_include_directories(jps3d_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
-target_compile_features(jps3d_node PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
+target_compile_features(jps3d_node PUBLIC c_std_99 cxx_std_17)
+target_link_libraries(jps3d_node jps_lib)
+ament_target_dependencies(jps3d_node
+  rclcpp nav_msgs geometry_msgs sensor_msgs)
 
 # include(CTest)
 
@@ -69,3 +76,5 @@ install(DIRECTORY include/jps_basis include/jps_planner include/jps_collision
 
 install(TARGETS jps3d_node
   DESTINATION lib/${PROJECT_NAME})
+
+ament_package()
