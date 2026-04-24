@@ -1,5 +1,6 @@
 #include <cmath>
 #include <memory>
+#include <mutex>
 
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -59,6 +60,9 @@ private:
     std::shared_ptr<JPS::VoxelMapUtil> map_util_;
     std::shared_ptr<JPSPlanner3D>      planner_;
 
+    // Mutex to protect shared map/planner state
+    std::mutex map_mutex_;
+
     // ROS interfaces
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr              path_pub_;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr voxel_sub_;
@@ -73,6 +77,11 @@ private:
         double sy = this->get_parameter("map_size_y").as_double();
         double sz = this->get_parameter("map_size_z").as_double();
         double res = this->get_parameter("map_resolution").as_double();
+
+        if (res <= 0.0) {
+            RCLCPP_FATAL(this->get_logger(), "map_resolution must be > 0, got %f", res);
+            throw std::invalid_argument("map_resolution must be positive");
+        }
 
         Vec3f origin(ox, oy, oz);
         Vec3i dim(
@@ -92,6 +101,7 @@ private:
 
     void voxel_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
     {
+        std::lock_guard<std::mutex> lock(map_mutex_);
         auto origin = map_util_->getOrigin();
         auto dim    = map_util_->getDim();
         double res  = map_util_->getRes();
@@ -124,6 +134,8 @@ private:
         const std::shared_ptr<nav_msgs::srv::GetPlan::Request>  request,
         std::shared_ptr<nav_msgs::srv::GetPlan::Response>       response)
     {
+        std::lock_guard<std::mutex> lock(map_mutex_);
+
         Vec3f start(
             request->start.pose.position.x,
             request->start.pose.position.y,
@@ -139,19 +151,24 @@ private:
         bool success = planner_->plan(start, goal, eps, use_jps);
         if (!success) {
             RCLCPP_WARN(this->get_logger(),
-                        "Planning failed. Planner status: %d", planner_->status());
+                        "Planning failed. Planner status: %d", static_cast<int>(planner_->status()));
             return;
         }
 
         auto path_pts = planner_->getPath();
         nav_msgs::msg::Path path_msg;
-        path_msg.header.frame_id = request->goal.header.frame_id;
-        path_msg.header.stamp    = this->now();
+
+        std::string frame_id = request->start.header.frame_id.empty()
+            ? request->goal.header.frame_id
+            : request->start.header.frame_id;
+        auto stamp = this->now();
+        path_msg.header.frame_id = frame_id;
+        path_msg.header.stamp    = stamp;
 
         for (const auto & pt : path_pts) {
             geometry_msgs::msg::PoseStamped pose;
-            pose.header.frame_id    = request->goal.header.frame_id;
-            pose.header.stamp       = this->now();
+            pose.header.frame_id    = frame_id;
+            pose.header.stamp       = stamp;
             pose.pose.position.x    = pt(0);
             pose.pose.position.y    = pt(1);
             pose.pose.position.z    = pt(2);
