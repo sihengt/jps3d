@@ -12,6 +12,9 @@ Jps3dNode::Jps3dNode() : Node("jps3d_node")
     this->declare_parameter<double>("map_resolution", 0.1);
     this->declare_parameter<double>("eps", 1.0);
     this->declare_parameter<bool>("use_jps", true);
+    this->declare_parameter<std::string>("voxel_sub_topic", "/occupied_voxels");
+    this->declare_parameter<std::string>("path_pub_topic", "/planned_path");
+    this->declare_parameter<std::string>("plan_srv_topic", "/plan");
 
     // Initialize the map and planner
     init_map();
@@ -19,16 +22,22 @@ Jps3dNode::Jps3dNode() : Node("jps3d_node")
     // Publisher: transient-local QoS depth 1
     rclcpp::QoS path_qos(1);
     path_qos.transient_local();
-    path_pub_ = this->create_publisher<nav_msgs::msg::Path>("/planned_path", path_qos);
+
+    // Get relevant topics
+    std::string voxel_sub_topic = this->get_parameter("voxel_sub_topic").as_string();
+    std::string path_pub_topic  = this->get_parameter("voxel_sub_topic").as_string();
+    std::string plan_srv_topic  = this->get_parameter("plan_srv_topic").as_string();
+
+    path_pub_ = this->create_publisher<nav_msgs::msg::Path>(path_pub_topic, path_qos);
 
     // Subscription: /occupied_voxels, depth 10
     voxel_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-        "/occupied_voxels", 10,
+        voxel_sub_topic, 10,
         std::bind(&Jps3dNode::voxel_callback, this, std::placeholders::_1));
 
     // Service: /plan
     plan_srv_ = this->create_service<nav_msgs::srv::GetPlan>(
-        "/plan",
+        plan_srv_topic,
         std::bind(&Jps3dNode::plan_callback, this,
                     std::placeholders::_1, std::placeholders::_2));
 
