@@ -29,7 +29,7 @@ Jps3dNode::Jps3dNode() : Node("jps3d_node")
     std::string plan_srv_topic  = this->get_parameter("plan_srv_topic").as_string();
 
     path_pub_ = this->create_publisher<nav_msgs::msg::Path>(path_pub_topic, path_qos);
-
+    voxel_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("jps3d_voxels" , rclcpp::QoS(10));
     // Subscription: /occupied_voxels, depth 10
     voxel_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
         voxel_sub_topic, 10,
@@ -78,6 +78,26 @@ void Jps3dNode::init_map()
     planner_ = std::make_shared<JPSPlanner3D>(false);
     planner_->setMapUtil(map_util_);
     planner_->updateMap();
+
+    // Hard-coding occupied voxels to always be red.
+    std_msgs::msg::ColorRGBA occupied_color;
+    occupied_color.r = 1.0;
+    occupied_color.g = 0.0;
+    occupied_color.b = 0.0;
+    occupied_color.a = 0.5;
+
+    // Initializing occupied marker scale
+    geometry_msgs::msg::Vector3 scale;
+    scale.x = res;
+    scale.y = res;
+    scale.z = res;
+
+    // Setting up marker templates for occupied cells.
+    occ_marker_template.pose.orientation.w = 1;
+    occ_marker_template.type = visualization_msgs::msg::Marker::CUBE;
+    occ_marker_template.action = visualization_msgs::msg::Marker::ADD;
+    occ_marker_template.scale = scale;
+    occ_marker_template.color = occupied_color;
 }
 
 void Jps3dNode::voxel_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
@@ -90,11 +110,21 @@ void Jps3dNode::voxel_callback(const sensor_msgs::msg::PointCloud2::SharedPtr ms
     // Reset map to all-free
     JPS::Tmap data(static_cast<size_t>(dim(0)) * dim(1) * dim(2), 0);
 
+    // Counter to keep track of occupied voxels
     int marked = 0;
     sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x");
     sensor_msgs::PointCloud2ConstIterator<float> iter_y(*msg, "y");
     sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
 
+    visualization_msgs::msg::MarkerArray markers;
+    visualization_msgs::msg::Marker delete_all;
+    markers.markers.reserve(msg->width * msg->height + 1);
+    delete_all.action = visualization_msgs::msg::Marker::DELETEALL;
+    markers.markers.push_back(delete_all);
+    int marker_id = 0;
+
+    // Mark all voxels that contain are nonempty in the pointcloud as an obstacle.
+    // Also updates marker array for visualization
     for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
         Vec3f pt(*iter_x, *iter_y, *iter_z);
         Vec3i pn = map_util_->floatToInt(pt);
@@ -103,10 +133,25 @@ void Jps3dNode::voxel_callback(const sensor_msgs::msg::PointCloud2::SharedPtr ms
         }
         data[map_util_->getIndex(pn)] = 100;
         ++marked;
+        
+        // Updating occupied marker
+        visualization_msgs::msg::Marker occ_marker = occ_marker_template;
+        occ_marker.header = msg->header;
+        occ_marker.id = marker_id++;
+        occ_marker.pose.position.x = pt(0);
+        occ_marker.pose.position.y = pt(1);
+        occ_marker.pose.position.z = pt(2);
+
+        // Adding occupied marker into marker array
+        markers.markers.push_back(occ_marker);
     }
 
+    // Sets map in map_util_, and updates map within the planner.
     map_util_->setMap(origin, dim, data, res);
     planner_->updateMap();
+
+    // Publish markers
+    voxel_pub_->publish(markers);
 
     RCLCPP_DEBUG(this->get_logger(), "Voxel map updated: %d occupied voxels", marked);
 }
@@ -172,7 +217,6 @@ void Jps3dNode::plan_callback(
     response->plan = path_msg;
     path_pub_->publish(path_msg);
 }
-
 
 int main(int argc, char ** argv)
 {

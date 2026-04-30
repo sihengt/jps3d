@@ -20,6 +20,8 @@ find_package(rclcpp REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 
 PKG_CHECK_MODULES(YAMLCPP REQUIRED yaml-cpp)
 if(YAMLCPP_FOUND)
@@ -46,7 +48,7 @@ target_include_directories(jps3d_node PUBLIC
 target_compile_features(jps3d_node PUBLIC c_std_99 cxx_std_17)
 target_link_libraries(jps3d_node jps_lib)
 ament_target_dependencies(jps3d_node
-  rclcpp nav_msgs geometry_msgs sensor_msgs)
+  rclcpp nav_msgs geometry_msgs sensor_msgs visualization_msgs std_msgs)
 
 # include(CTest)
 

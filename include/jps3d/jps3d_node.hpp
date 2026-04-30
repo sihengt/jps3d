@@ -8,6 +8,7 @@
 #include <nav_msgs/srv/get_plan.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
 
 #include <jps_basis/data_type.h>
 #include <jps_collision/map_util.h>
@@ -27,10 +28,20 @@ private:
     std::mutex map_mutex_;
 
     // ROS interfaces
-    rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr              path_pub_;
-    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr voxel_sub_;
-    rclcpp::Service<nav_msgs::srv::GetPlan>::SharedPtr             plan_srv_;
+    rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr                   path_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr  voxel_pub_;  
+    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr      voxel_sub_;
+    rclcpp::Service<nav_msgs::srv::GetPlan>::SharedPtr                  plan_srv_;
+    
+    visualization_msgs::msg::Marker occ_marker_template;
 
+    /**
+     * @brief initializes map, planner, and sets map within planner class.
+     * 
+     * Initializes map data (JPS::Tmap), map_util_ (JPS::VoxelMapUtil) as well as a 
+     * planner (JPSPlanner3D). Sets the map util within the planner and update the map 
+     * within the planner.
+     */
     void init_map();
     void voxel_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
     void plan_callback(
