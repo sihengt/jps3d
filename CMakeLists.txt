@@ -34,6 +34,7 @@ include_directories(include ${EIGEN3_INCLUDE_DIRS})
 
 add_library(jps_lib src/jps_planner/graph_search.cpp
   src/jps_planner/jps_planner.cpp)
+target_compile_options(jps_lib PRIVATE -Wno-implicit-fallthrough)
 
 add_library(dmp_lib src/distance_map_planner/graph_search.cpp
   src/distance_map_planner/distance_map_planner.cpp)
