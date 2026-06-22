@@ -21,12 +21,17 @@ class InteractiveGoalClient(Node):
         self.declare_parameter('plan_srv_topic', '/plan')
         self.declare_parameter('tolerance', 0.5)
         self.declare_parameter('marker_frame', 'map')
+        self.declare_parameter('replan_period', 1.0)
 
         odom_topic      = self.get_parameter('odom_topic').get_parameter_value().string_value
         plan_srv_topic  = self.get_parameter('plan_srv_topic').get_parameter_value().string_value
         self._frame     = self.get_parameter('marker_frame').get_parameter_value().string_value
+        self._replan_period = self.get_parameter('replan_period').get_parameter_value().double_value
 
         self._latest_odom = None
+        self._active = False
+        self._first_request_logged = False
+        self._first_reply_logged = False
 
         sensor_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -42,6 +47,7 @@ class InteractiveGoalClient(Node):
         self._menu = MenuHandler()
         self._menu.insert('Plan to here', callback=self._menu_plan_cb)
         self._menu.insert('Move marker to drone', callback=self._menu_reset_cb)
+        self._menu.insert('Stop replanning', callback=self._menu_stop_replan_cb)
 
         # Start marker at a convenient position; user can drag it anywhere
         self._marker_pose = PoseStamped()
@@ -58,6 +64,16 @@ class InteractiveGoalClient(Node):
             'Interactive goal client ready.\n'
             '  Drag the sphere in RViz to your goal, then right-click → "Plan to here".\n'
             '  Add topic: /goal_marker/update  (InteractiveMarkers display).')
+
+        if self._replan_period > 0.0:
+            self._replan_timer = self.create_timer(self._replan_period, self._replan_tick)
+            self.get_logger().info(
+                f'Periodic re-plan enabled at {1.0 / self._replan_period:.2f} Hz '
+                f'(period {self._replan_period:.2f} s). '
+                'First plan must still be triggered with right-click → "Plan to here".')
+        else:
+            self._replan_timer = None
+            self.get_logger().info('Periodic re-plan disabled (replan_period <= 0).')
 
     # ------------------------------------------------------------------
     def _make_marker(self):
@@ -109,6 +125,13 @@ class InteractiveGoalClient(Node):
     def _feedback_cb(self, feedback):
         self._marker_pose.pose = feedback.pose
 
+    def _menu_stop_replan_cb(self, feedback):
+        if not self._active:
+            self.get_logger().info('Replan already inactive.')
+            return
+        self._active = False
+        self.get_logger().info('Replanning stopped. Right-click → "Plan to here" to resume.')
+
     def _menu_reset_cb(self, feedback):
         if self._latest_odom is None:
             self.get_logger().warn('No odometry yet.')
@@ -150,12 +173,17 @@ class InteractiveGoalClient(Node):
 
         gp = goal.pose.position
         sp = start.pose.position
-        self.get_logger().info(
-            f'Planning ({sp.x:.2f}, {sp.y:.2f}, {sp.z:.2f}) → '
-            f'({gp.x:.2f}, {gp.y:.2f}, {gp.z:.2f})')
+        msg = (f'Planning ({sp.x:.2f}, {sp.y:.2f}, {sp.z:.2f}) → '
+               f'({gp.x:.2f}, {gp.y:.2f}, {gp.z:.2f})')
+        if self._first_request_logged:
+            self.get_logger().debug(msg)
+        else:
+            self.get_logger().info(msg)
+            self._first_request_logged = True
 
         future = self._plan_client.call_async(req)
         future.add_done_callback(self._plan_done_cb)
+        self._active = True
 
     def _plan_done_cb(self, future):
         try:
@@ -163,10 +191,26 @@ class InteractiveGoalClient(Node):
             n = len(result.plan.poses)
             if n == 0:
                 self.get_logger().warn('Plan returned empty path — goal may be unreachable.')
+                return
+            msg = f'Plan received: {n} waypoints.'
+            if self._first_reply_logged:
+                self.get_logger().debug(msg)
             else:
-                self.get_logger().info(f'Plan received: {n} waypoints.')
+                self.get_logger().info(msg)
+                self._first_reply_logged = True
         except Exception as e:
             self.get_logger().error(f'Plan service call failed: {e}')
+
+    def _replan_tick(self):
+        if not self._active:
+            return
+        if self._latest_odom is None:
+            return
+        if not self._plan_client.service_is_ready():
+            return
+        # Reuse the manual click path. _menu_plan_cb does not actually use
+        # the `feedback` arg — it reads marker pose from self._marker_pose.
+        self._menu_plan_cb(None)
 
 
 def main(args=None):

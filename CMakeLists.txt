@@ -80,4 +80,9 @@ install(DIRECTORY include/jps_basis include/jps_planner include/jps_collision
 install(TARGETS jps3d_node
   DESTINATION lib/${PROJECT_NAME})
 
+install(PROGRAMS
+  scripts/rviz_goal_client.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()
