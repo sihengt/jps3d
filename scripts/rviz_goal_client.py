@@ -22,12 +22,15 @@ class InteractiveGoalClient(Node):
         self.declare_parameter('tolerance', 0.5)
         self.declare_parameter('marker_frame', 'map')
         self.declare_parameter('replan_period', 1.0)
+        # This topic is for setting a goal from a ros2 topic.
+        self.declare_parameter('goal_xyz_topic', '/goal_xyz')
 
         odom_topic      = self.get_parameter('odom_topic').get_parameter_value().string_value
         plan_srv_topic  = self.get_parameter('plan_srv_topic').get_parameter_value().string_value
         self._frame     = self.get_parameter('marker_frame').get_parameter_value().string_value
         self._replan_period = self.get_parameter('replan_period').get_parameter_value().double_value
-
+        goal_xyz_topic  = self.get_parameter('goal_xyz_topic').get_parameter_value().string_value
+        
         self._latest_odom = None
         self._active = False
         self._first_request_logged = False
@@ -38,12 +41,16 @@ class InteractiveGoalClient(Node):
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
         )
+        
+        # default reliable qos, 10 is the depth
+        self.create_subscription(PoseStamped, goal_xyz_topic, self._manual_goal_cb, 10)
         self.create_subscription(Odometry, odom_topic, self._odom_cb, sensor_qos)
         self._plan_client = self.create_client(GetPlan, plan_srv_topic)
 
         # Interactive marker server
         self._server = InteractiveMarkerServer(self, 'goal_marker')
 
+        # Right click menu that comes out whenever clicked.
         self._menu = MenuHandler()
         self._menu.insert('Plan to here', callback=self._menu_plan_cb)
         self._menu.insert('Move marker to drone', callback=self._menu_reset_cb)
@@ -144,7 +151,7 @@ class InteractiveGoalClient(Node):
         self._server.applyChanges()
         self.get_logger().info(f'Marker moved to drone position ({p.x:.2f}, {p.y:.2f}, {p.z:.2f})')
 
-    def _menu_plan_cb(self, feedback):
+    def _menu_plan_cb(self, feedback=None):
         if self._latest_odom is None:
             self.get_logger().warn('No odometry received yet — cannot plan.')
             return
@@ -201,6 +208,14 @@ class InteractiveGoalClient(Node):
         except Exception as e:
             self.get_logger().error(f'Plan service call failed: {e}')
 
+    def _manual_goal_cb(self, msg):
+        self._marker_pose.header.frame_id = self._frame
+        self._marker_pose.pose.position.x = msg.pose.position.x
+        self._marker_pose.pose.position.y = msg.pose.position.y
+        self._marker_pose.pose.position.z = msg.pose.position.z
+        self._marker_pose.pose.orientation.w = 1.0
+        self._menu_plan_cb()
+
     def _replan_tick(self):
         if not self._active:
             return
@@ -208,9 +223,7 @@ class InteractiveGoalClient(Node):
             return
         if not self._plan_client.service_is_ready():
             return
-        # Reuse the manual click path. _menu_plan_cb does not actually use
-        # the `feedback` arg — it reads marker pose from self._marker_pose.
-        self._menu_plan_cb(None)
+        self._menu_plan_cb()
 
 
 def main(args=None):
