@@ -261,6 +261,9 @@ private:
     /// Initialize 2D jps arrays
     void init2DJps();
 
+    static constexpr double SQRT2 = 1.41421356237309504;
+    static constexpr double SQRT3 = 1.73205080756887729;
+
     const char *cMap_;
     int xDim_, yDim_, zDim_;
     double eps_;
