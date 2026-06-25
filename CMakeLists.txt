@@ -51,15 +51,15 @@ target_link_libraries(jps3d_node jps_lib)
 ament_target_dependencies(jps3d_node
   rclcpp nav_msgs geometry_msgs sensor_msgs visualization_msgs std_msgs)
 
-# include(CTest)
+include(CTest)
 
-# add_executable(test_planner_2d test/test_planner_2d.cpp)
-# target_link_libraries(test_planner_2d jps_lib ${YAMLCPP_LIBRARIES} ${Boost_LIBRARIES})
-# add_test(test_planner_2d test_planner_2d ${CMAKE_SOURCE_DIR}/data/corridor.yaml)
+add_executable(test_planner_2d test/test_planner_2d.cpp)
+target_link_libraries(test_planner_2d jps_lib ${YAMLCPP_LIBRARIES})
+add_test(test_planner_2d test_planner_2d ${CMAKE_SOURCE_DIR}/data/corridor.yaml)
 
-# add_executable(test_planner_3d test/test_planner_3d.cpp)
-# target_link_libraries(test_planner_3d jps_lib ${YAMLCPP_LIBRARIES})
-# add_test(test_planner_3d test_planner_3d ${CMAKE_SOURCE_DIR}/data/simple3d.yaml)
+add_executable(test_planner_3d test/test_planner_3d.cpp)
+target_link_libraries(test_planner_3d jps_lib ${YAMLCPP_LIBRARIES})
+add_test(test_planner_3d test_planner_3d ${CMAKE_SOURCE_DIR}/data/simple3d.yaml)
 
 # add_executable(test_distance_map_planner_2d test/test_distance_map_planner_2d.cpp)
 # target_link_libraries(test_distance_map_planner_2d jps_lib dmp_lib ${YAMLCPP_LIBRARIES} ${Boost_LIBRARIES})
