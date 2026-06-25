@@ -80,15 +80,20 @@ inline bool GraphSearch::isOccupied(int x, int y, int z) const
 
 inline double GraphSearch::getHeur(int x, int y) const
 {
-    return eps_ *
-           std::sqrt((x - xGoal_) * (x - xGoal_) + (y - yGoal_) * (y - yGoal_));
+    int dx = std::abs(x - xGoal_);
+    int dy = std::abs(y - yGoal_);
+    return eps_ * (dx + dy + (SQRT2 - 2.0) * std::min(dx, dy));
 }
 
 inline double GraphSearch::getHeur(int x, int y, int z) const
 {
-    return eps_ *
-           std::sqrt((x - xGoal_) * (x - xGoal_) + (y - yGoal_) * (y - yGoal_) +
-                     (z - zGoal_) * (z - zGoal_));
+    int dx = std::abs(x - xGoal_);
+    int dy = std::abs(y - yGoal_);
+    int dz = std::abs(z - zGoal_);
+    int dmin = std::min({dx, dy, dz});
+    int dmax = std::max({dx, dy, dz});
+    int dmid = dx + dy + dz - dmin - dmax;
+    return eps_ * (SQRT3 * dmin + SQRT2 * (dmid - dmin) + 1.0 * (dmax - dmid));
 }
 
 bool GraphSearch::plan(int xStart, int yStart, int xGoal, int yGoal,
@@ -359,9 +364,14 @@ void GraphSearch::getJpsSucc(const StatePtr &curr, std::vector<int> &succ_ids,
             }
 
             succ_ids.push_back(new_id);
-            succ_costs.push_back(
-                std::sqrt((new_x - curr->x) * (new_x - curr->x) +
-                          (new_y - curr->y) * (new_y - curr->y)));
+
+            // JPS jumps are always axis-aligned or diagonal, so cost is always
+            // (steps * unit_cost) where unit_cost is 1.0 or SQRT2 — exact for
+            // cardinal and diagonal moves, avoids a sqrt() call per successor.
+            const int adx = std::abs(new_x - curr->x);
+            const int ady = std::abs(new_y - curr->y);
+            const double unit = (adx == ady) ? GraphSearch::SQRT2 : 1.0;
+            succ_costs.push_back(unit * std::max(adx, ady));
         }
     }
     else
@@ -413,10 +423,16 @@ void GraphSearch::getJpsSucc(const StatePtr &curr, std::vector<int> &succ_ids,
             }
 
             succ_ids.push_back(new_id);
-            succ_costs.push_back(
-                std::sqrt((new_x - curr->x) * (new_x - curr->x) +
-                          (new_y - curr->y) * (new_y - curr->y) +
-                          (new_z - curr->z) * (new_z - curr->z)));
+
+            // Same reasoning as the 2D branch: direction is cardinal,
+            // face-diagonal, or body-diagonal, so cost is steps * unit_cost.
+            const int adx = std::abs(new_x - curr->x);
+            const int ady = std::abs(new_y - curr->y);
+            const int adz = std::abs(new_z - curr->z);
+            const int steps = std::max({adx, ady, adz});
+            const int axes = (adx > 0) + (ady > 0) + (adz > 0);
+            const double unit = (axes == 1) ? 1.0 : (axes == 2) ? GraphSearch::SQRT2 : GraphSearch::SQRT3;
+            succ_costs.push_back(unit * steps);
         }
     }
 }
