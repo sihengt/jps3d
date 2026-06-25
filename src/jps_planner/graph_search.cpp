@@ -159,6 +159,14 @@ bool GraphSearch::plan(StatePtr &currNode_ptr, int maxExpand, int start_id,
     seen_[currNode_ptr->id] = true;
 
     int expand_iteration = 0;
+
+    // Hoisted out of the loop — these used to be constructed/destroyed on
+    // every single expansion, forcing a heap allocation per iteration. Now
+    // they're cleared and reused; their capacity stabilizes after the first
+    // few iterations.
+    std::vector<int> succ_ids;
+    std::vector<double> succ_costs;
+
     while (true)
     {
         expand_iteration++;
@@ -174,9 +182,8 @@ bool GraphSearch::plan(StatePtr &currNode_ptr, int maxExpand, int start_id,
             break;
         }
 
-        // printf("expand: %d, %d\n", currNode_ptr->x, currNode_ptr->y);
-        std::vector<int> succ_ids;
-        std::vector<double> succ_costs;
+        succ_ids.clear();
+        succ_costs.clear();
         // Get successors
         if (!use_jps_)
             getSucc(currNode_ptr, succ_ids, succ_costs);
@@ -270,6 +277,9 @@ std::vector<StatePtr> GraphSearch::recoverPath(StatePtr node, int start_id)
 void GraphSearch::getSucc(const StatePtr &curr, std::vector<int> &succ_ids,
                           std::vector<double> &succ_costs)
 {
+    succ_ids.reserve(ns_.size());
+    succ_costs.reserve(ns_.size());
+
     if (use_2d_)
     {
         for (const auto &d : ns_)
@@ -328,6 +338,9 @@ void GraphSearch::getJpsSucc(const StatePtr &curr, std::vector<int> &succ_ids,
         int num_fneib = jn2d_->nsz[norm1][1];
         int id = (curr->dx + 1) + 3 * (curr->dy + 1);
 
+        succ_ids.reserve(num_neib + num_fneib);
+        succ_costs.reserve(num_neib + num_fneib);
+
         for (int dev = 0; dev < num_neib + num_fneib; ++dev)
         {
             int new_x, new_y;
@@ -381,6 +394,9 @@ void GraphSearch::getJpsSucc(const StatePtr &curr, std::vector<int> &succ_ids,
         int num_neib = jn3d_->nsz[norm1][0];
         int num_fneib = jn3d_->nsz[norm1][1];
         int id = (curr->dx + 1) + 3 * (curr->dy + 1) + 9 * (curr->dz + 1);
+
+        succ_ids.reserve(num_neib + num_fneib);
+        succ_costs.reserve(num_neib + num_fneib);
 
         for (int dev = 0; dev < num_neib + num_fneib; ++dev)
         {
