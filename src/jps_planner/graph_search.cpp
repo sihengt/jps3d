@@ -473,6 +473,11 @@ bool GraphSearch::jump(int x, int y, int dx, int dy, int &new_x, int &new_y)
         if (!isFree(new_x, new_y))
             return false;
 
+        // No corner cutting: a diagonal step may only be taken if it does
+        // not squeeze diagonally between two blocked cells.
+        if (cutsCorner(x, y, dx, dy))
+            return false;
+
         if (new_x == xGoal_ && new_y == yGoal_)
             return true;
 
@@ -512,6 +517,11 @@ bool GraphSearch::jump(int x, int y, int z, int dx, int dy, int dz, int &new_x,
         new_z = z + dz;
 
         if (!isFree(new_x, new_y, new_z))
+            return false;
+
+        // No corner cutting: a diagonal/body-diagonal step may only be taken
+        // if it does not squeeze through blocked bypass cells.
+        if (cutsCorner(x, y, z, dx, dy, dz))
             return false;
 
         if (new_x == xGoal_ && new_y == yGoal_ && new_z == zGoal_)
@@ -616,6 +626,44 @@ inline bool GraphSearch::hasForcedWithId(int x, int y, int z, int id, int norm1)
             return true;
     }
     return false;
+}
+
+// 2D no-corner-cut test. For a diagonal step (dx,dy both nonzero) from (x,y),
+// the move squeezes through a diagonal gap only if BOTH orthogonal bypass
+// cells -- (x+dx, y) and (x, y+dy) -- are blocked. If either is free the
+// diagonal is a legitimate move (wall-hugging is allowed). Cardinal moves
+// (one of dx,dy is zero) never cut a corner.
+inline bool GraphSearch::cutsCorner(int x, int y, int dx, int dy)
+{
+    if (dx == 0 || dy == 0)
+        return false;
+    return isOccupied(x + dx, y) && isOccupied(x, y + dy);
+}
+
+// 3D no-corner-cut test.
+//   - cardinal (norm1==1): never cuts a corner.
+//   - face-diagonal (norm1==2): the two nonzero axes form a 2D diagonal in a
+//     plane; same rule as 2D applied to those two axes (the third axis is 0).
+//   - body-diagonal (norm1==3): blocked only if all three single-axis
+//     -reverted bypass cells are occupied (no free route around the squeeze).
+inline bool GraphSearch::cutsCorner(int x, int y, int z, int dx, int dy, int dz)
+{
+    const int norm1 = std::abs(dx) + std::abs(dy) + std::abs(dz);
+    if (norm1 <= 1)
+        return false;
+
+    if (norm1 == 2)
+    {
+        if (dx == 0)
+            return isOccupied(x, y + dy, z) && isOccupied(x, y, z + dz);
+        if (dy == 0)
+            return isOccupied(x + dx, y, z) && isOccupied(x, y, z + dz);
+        return isOccupied(x + dx, y, z) && isOccupied(x, y + dy, z);
+    }
+
+    return isOccupied(x, y + dy, z + dz) &&
+           isOccupied(x + dx, y, z + dz) &&
+           isOccupied(x + dx, y + dy, z);
 }
 
 std::vector<StatePtr> GraphSearch::getPath() const { return path_; }
