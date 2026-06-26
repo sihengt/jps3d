@@ -258,6 +258,11 @@ private:
     /// Same as hasForced, but takes the id/norm1 already computed by jump()
     bool hasForcedWithId(int x, int y, int z, int id, int norm1);
 
+    /// 2D no-corner-cut test for a diagonal step (dx, dy) from (x, y)
+    bool cutsCorner(int x, int y, int dx, int dy);
+    /// 3D no-corner-cut test for a diagonal step (dx, dy, dz) from (x, y, z)
+    bool cutsCorner(int x, int y, int z, int dx, int dy, int dz);
+
     /// 2D jump, return true iff finding the goal or a jump point
     bool jump(int x, int y, int dx, int dy, int &new_x, int &new_y);
     /// 3D jump, return true iff finding the goal or a jump point
