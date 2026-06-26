@@ -455,58 +455,83 @@ void GraphSearch::getJpsSucc(const StatePtr &curr, std::vector<int> &succ_ids,
 
 bool GraphSearch::jump(int x, int y, int dx, int dy, int &new_x, int &new_y)
 {
-    new_x = x + dx;
-    new_y = y + dy;
-    if (!isFree(new_x, new_y))
-        return false;
-
-    if (new_x == xGoal_ && new_y == yGoal_)
-        return true;
-
-    if (hasForced(new_x, new_y, dx, dy))
-        return true;
-
+    // Constant for the entire corridor walk below — compute once.
     const int id = (dx + 1) + 3 * (dy + 1);
     const int norm1 = std::abs(dx) + std::abs(dy);
-    int num_neib = jn2d_->nsz[norm1][0];
-    for (int k = 0; k < num_neib - 1; ++k)
-    {
-        int new_new_x, new_new_y;
-        if (jump(new_x, new_y, jn2d_->ns[id][0][k], jn2d_->ns[id][1][k],
-                 new_new_x, new_new_y))
-            return true;
-    }
+    const int num_neib = jn2d_->nsz[norm1][0];
+    const int *sub_dx = jn2d_->ns[id][0];
+    const int *sub_dy = jn2d_->ns[id][1];
 
-    return jump(new_x, new_y, dx, dy, new_x, new_y);
+    // Iterative corridor walk — replaces tail recursion, avoiding stack
+    // growth on long straight corridors. Sub-direction probes still recurse
+    // below, bounded to 2 live frames (diagonal -> cardinal -> no sub-calls).
+    while (true)
+    {
+        new_x = x + dx;
+        new_y = y + dy;
+
+        if (!isFree(new_x, new_y))
+            return false;
+
+        if (new_x == xGoal_ && new_y == yGoal_)
+            return true;
+
+        if (hasForcedWithId(new_x, new_y, id, norm1))
+            return true;
+
+        for (int k = 0; k < num_neib - 1; ++k)
+        {
+            int sub_new_x, sub_new_y;
+            if (jump(new_x, new_y, sub_dx[k], sub_dy[k], sub_new_x, sub_new_y))
+                return true;
+        }
+
+        x = new_x;
+        y = new_y;
+    }
 }
 
 bool GraphSearch::jump(int x, int y, int z, int dx, int dy, int dz, int &new_x,
                        int &new_y, int &new_z)
 {
-    new_x = x + dx;
-    new_y = y + dy;
-    new_z = z + dz;
-    if (!isFree(new_x, new_y, new_z))
-        return false;
-
-    if (new_x == xGoal_ && new_y == yGoal_ && new_z == zGoal_)
-        return true;
-
-    if (hasForced(new_x, new_y, new_z, dx, dy, dz))
-        return true;
-
     const int id = (dx + 1) + 3 * (dy + 1) + 9 * (dz + 1);
     const int norm1 = std::abs(dx) + std::abs(dy) + std::abs(dz);
-    int num_neib = jn3d_->nsz[norm1][0];
-    for (int k = 0; k < num_neib - 1; ++k)
-    {
-        int new_new_x, new_new_y, new_new_z;
-        if (jump(new_x, new_y, new_z, jn3d_->ns[id][0][k], jn3d_->ns[id][1][k],
-                 jn3d_->ns[id][2][k], new_new_x, new_new_y, new_new_z))
-            return true;
-    }
+    const int num_neib = jn3d_->nsz[norm1][0];
+    const int *sub_dx = jn3d_->ns[id][0];
+    const int *sub_dy = jn3d_->ns[id][1];
+    const int *sub_dz = jn3d_->ns[id][2];
 
-    return jump(new_x, new_y, new_z, dx, dy, dz, new_x, new_y, new_z);
+    // Iterative corridor walk. Sub-direction probes still recurse below;
+    // recursion depth is bounded because sub-directions always have
+    // strictly lower norm1 (body-diag -> face-diag -> cardinal -> none),
+    // so max live stack depth is 3 frames regardless of grid size.
+    while (true)
+    {
+        new_x = x + dx;
+        new_y = y + dy;
+        new_z = z + dz;
+
+        if (!isFree(new_x, new_y, new_z))
+            return false;
+
+        if (new_x == xGoal_ && new_y == yGoal_ && new_z == zGoal_)
+            return true;
+
+        if (hasForcedWithId(new_x, new_y, new_z, id, norm1))
+            return true;
+
+        for (int k = 0; k < num_neib - 1; ++k)
+        {
+            int sub_new_x, sub_new_y, sub_new_z;
+            if (jump(new_x, new_y, new_z, sub_dx[k], sub_dy[k], sub_dz[k],
+                     sub_new_x, sub_new_y, sub_new_z))
+                return true;
+        }
+
+        x = new_x;
+        y = new_y;
+        z = new_z;
+    }
 }
 
 inline bool GraphSearch::hasForced(int x, int y, int dx, int dy)
@@ -564,6 +589,33 @@ inline bool GraphSearch::hasForced(int x, int y, int z, int dx, int dy, int dz)
     default:
         return false;
     }
+}
+
+inline bool GraphSearch::hasForcedWithId(int x, int y, int id, int norm1)
+{
+    const int num_forced = jn2d_->nsz[norm1][1];
+    const int *f1x = jn2d_->f1[id][0];
+    const int *f1y = jn2d_->f1[id][1];
+    for (int fn = 0; fn < num_forced; ++fn)
+    {
+        if (isOccupied(x + f1x[fn], y + f1y[fn]))
+            return true;
+    }
+    return false;
+}
+
+inline bool GraphSearch::hasForcedWithId(int x, int y, int z, int id, int norm1)
+{
+    const int num_forced = jn3d_->nsz[norm1][1];
+    const int *f1x = jn3d_->f1[id][0];
+    const int *f1y = jn3d_->f1[id][1];
+    const int *f1z = jn3d_->f1[id][2];
+    for (int fn = 0; fn < num_forced; ++fn)
+    {
+        if (isOccupied(x + f1x[fn], y + f1y[fn], z + f1z[fn]))
+            return true;
+    }
+    return false;
 }
 
 std::vector<StatePtr> GraphSearch::getPath() const { return path_; }

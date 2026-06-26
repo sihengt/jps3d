@@ -252,6 +252,12 @@ private:
     /// Determine if (x, y, z) has forced neighbor with direction (dx, dy, dz)
     bool hasForced(int x, int y, int z, int dx, int dy, int dz);
 
+    /// Same as hasForced, but takes the id/norm1 already computed by jump(),
+    /// avoiding recomputing them on every corridor step
+    bool hasForcedWithId(int x, int y, int id, int norm1);
+    /// Same as hasForced, but takes the id/norm1 already computed by jump()
+    bool hasForcedWithId(int x, int y, int z, int id, int norm1);
+
     /// 2D jump, return true iff finding the goal or a jump point
     bool jump(int x, int y, int dx, int dy, int &new_x, int &new_y);
     /// 3D jump, return true iff finding the goal or a jump point
