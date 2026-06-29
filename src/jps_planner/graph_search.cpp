@@ -706,10 +706,11 @@ std::vector<StatePtr> GraphSearch::getPath() const { return path_; }
 std::vector<StatePtr> GraphSearch::getOpenSet() const
 {
     std::vector<StatePtr> ss;
-    for (const auto &it : hm_)
+    for (size_t i = 0; i < hm_.size(); ++i)
     {
-        if (it && it->opened && !it->closed)
-            ss.push_back(it);
+        if (visited_[i] == current_planning_token_ && hm_[i] && hm_[i]->opened &&
+            !hm_[i]->closed)
+            ss.push_back(hm_[i]);
     }
     return ss;
 }
@@ -717,10 +718,10 @@ std::vector<StatePtr> GraphSearch::getOpenSet() const
 std::vector<StatePtr> GraphSearch::getCloseSet() const
 {
     std::vector<StatePtr> ss;
-    for (const auto &it : hm_)
+    for (size_t i = 0; i < hm_.size(); ++i)
     {
-        if (it && it->closed)
-            ss.push_back(it);
+        if (visited_[i] == current_planning_token_ && hm_[i] && hm_[i]->closed)
+            ss.push_back(hm_[i]);
     }
     return ss;
 }
@@ -728,10 +729,10 @@ std::vector<StatePtr> GraphSearch::getCloseSet() const
 std::vector<StatePtr> GraphSearch::getAllSet() const
 {
     std::vector<StatePtr> ss;
-    for (const auto &it : hm_)
+    for (size_t i = 0; i < hm_.size(); ++i)
     {
-        if (it)
-            ss.push_back(it);
+        if (visited_[i] == current_planning_token_ && hm_[i])
+            ss.push_back(hm_[i]);
     }
     return ss;
 }

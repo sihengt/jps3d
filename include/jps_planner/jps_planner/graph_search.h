@@ -309,10 +309,12 @@ private:
     // later searches reuse existing blocks with zero new heap allocation.
     // Safe only because GraphSearch persists across plan() calls (Task 8) --
     // otherwise the pool would be discarded every time.
+    static constexpr int kStateBlockSize = 10000;
+
     struct StateBlock
     {
         std::vector<State> block;
-        StateBlock() { block.resize(10000); }
+        StateBlock() { block.resize(kStateBlockSize); }
     };
     std::vector<std::unique_ptr<StateBlock>> state_pool_;
     int current_block_idx_ = 0;
@@ -324,7 +326,7 @@ private:
             state_pool_.push_back(std::make_unique<StateBlock>());
         StatePtr ptr = &state_pool_[current_block_idx_]->block[current_slot_idx_];
         current_slot_idx_++;
-        if (current_slot_idx_ >= 10000)
+        if (current_slot_idx_ >= kStateBlockSize)
         {
             current_slot_idx_ = 0;
             current_block_idx_++;
