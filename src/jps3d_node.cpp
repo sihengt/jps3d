@@ -10,6 +10,8 @@ Jps3dNode::Jps3dNode() : Node("jps3d_node")
     this->declare_parameter<double>("map_size_y", 40.0);
     this->declare_parameter<double>("map_size_z", 10.0);
     this->declare_parameter<double>("map_resolution", 0.1); // .05 for super
+    this->declare_parameter<double>(
+        "ceiling_height_z", std::numeric_limits<double>::infinity());
     this->declare_parameter<double>("eps", 1.0);
     this->declare_parameter<bool>("use_jps", true);
     this->declare_parameter<std::string>("voxel_sub_topic", "/octomap_point_cloud_centers");
@@ -39,8 +41,10 @@ Jps3dNode::Jps3dNode() : Node("jps3d_node")
 
     auto dim = map_util_->getDim();
     RCLCPP_INFO(this->get_logger(),
-                "JPS3D node ready. Map dim: [%d, %d, %d], resolution: %.3f m",
-                dim(0), dim(1), dim(2), map_util_->getRes());
+                "JPS3D node ready. Map dim: [%d, %d, %d], resolution: %.3f m, "
+                "ceiling: %.2f m",
+                dim(0), dim(1), dim(2), map_util_->getRes(),
+                this->get_parameter("ceiling_height_z").as_double());
 }
 
 void Jps3dNode::init_map()
@@ -69,6 +73,14 @@ void Jps3dNode::init_map()
 
     map_util_ = std::make_shared<JPS::VoxelMapUtil>();
     map_util_->setMap(origin, dim, data, res);
+
+    double ceiling_z = this->get_parameter("ceiling_height_z").as_double();
+    if (std::isfinite(ceiling_z) && ceiling_z <= oz)
+        RCLCPP_WARN(this->get_logger(),
+                    "ceiling_height_z (%.2f) is at or below map_origin_z "
+                    "(%.2f); the entire map will be blocked",
+                    ceiling_z, oz);
+    map_util_->setCeiling(ceiling_z);
 
     // constructor takes in verbosity boolean
     planner_ = std::make_shared<JPSPlanner3D>(true);
