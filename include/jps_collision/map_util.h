@@ -5,7 +5,9 @@
 #ifndef JPS_MAP_UTIL_H
 #define JPS_MAP_UTIL_H
 
+#include <cmath>
 #include <iostream>
+#include <limits>
 #include <jps_basis/data_type.h>
 
 namespace JPS
@@ -61,16 +63,22 @@ public:
     {
         if (isOutside(pn))
             return false;
-        else
-            return isFree(getIndex(pn));
+        // pn(Dim - 1) rather than the literal pn(2): for Dim == 2 this reads
+        // pn(1), which is in-bounds for a 2-element Veci, so the 2D
+        // instantiation still compiles. The Dim == 3 guard means it's never
+        // actually evaluated at runtime for Dim == 2.
+        if (Dim == 3 && pn(Dim - 1) >= ceiling_cell_z_)
+            return false;
+        return isFree(getIndex(pn));
     }
     /// Check if the given cell is occupied by coordinate
     bool isOccupied(const Veci<Dim> &pn)
     {
         if (isOutside(pn))
             return false;
-        else
-            return isOccupied(getIndex(pn));
+        if (Dim == 3 && pn(Dim - 1) >= ceiling_cell_z_)
+            return true;
+        return isOccupied(getIndex(pn));
     }
     /// Check if the given cell is unknown by coordinate
     bool isUnknown(const Veci<Dim> &pn)
@@ -95,6 +103,25 @@ public:
         dim_ = dim;
         origin_d_ = ori;
         res_ = res;
+    }
+
+    /**
+     * @brief Set a virtual ceiling
+     *
+     * Any cell whose vertical extent reaches or exceeds this world-frame Z
+     * height (meters) is treated as occupied by isFree()/isOccupied(),
+     * regardless of what the underlying map data says. Must be called after
+     * setMap(), since it depends on origin/resolution. Pass a non-finite
+     * value (e.g. +infinity, the default) to disable. No-op for Dim == 2
+     * (no Z axis).
+     */
+    void setCeiling(decimal_t max_z)
+    {
+        if (Dim == 3 && std::isfinite(max_z))
+            ceiling_cell_z_ = static_cast<int>(
+                std::floor((max_z - origin_d_(Dim - 1)) / res_));
+        else
+            ceiling_cell_z_ = std::numeric_limits<int>::max();
     }
 
     /// Print basic information about the util
@@ -357,6 +384,11 @@ protected:
     int8_t val_free = 0;
     /// Assume unknown cell has value -1
     int8_t val_unknown = -1;
+    /// Cell index at/above which a cell is treated as occupied by
+    /// isFree()/isOccupied(), regardless of map data. Set via setCeiling().
+    /// std::numeric_limits<int>::max() (the default) disables it, since no
+    /// real dim_(Dim-1) ever reaches that value.
+    int ceiling_cell_z_ = std::numeric_limits<int>::max();
 };
 
 typedef MapUtil<2> OccMapUtil;
