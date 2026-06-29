@@ -199,7 +199,9 @@ bool GraphSearch::plan(StatePtr &currNode_ptr, int maxExpand, int start_id,
             StatePtr &child_ptr = hm_[succ_ids[s]];
             double tentative_gval = currNode_ptr->g + succ_costs[s];
 
-            if (tentative_gval < child_ptr->g)
+            // Epsilon added for floating-point robustness now that edge costs
+            // can be irrational (sqrt(2)/sqrt(3) sums).
+            if (tentative_gval < child_ptr->g - 1e-9)
             {
                 child_ptr->parentId = currNode_ptr->id; // Assign new parent
                 child_ptr->g = tentative_gval;          // Update gval
@@ -210,20 +212,41 @@ bool GraphSearch::plan(StatePtr &currNode_ptr, int maxExpand, int start_id,
                 if (child_ptr->opened && !child_ptr->closed)
                 {
                     pq_.increase(child_ptr->heapkey); // update heap
-                    child_ptr->dx = (child_ptr->x - currNode_ptr->x);
-                    child_ptr->dy = (child_ptr->y - currNode_ptr->y);
-                    child_ptr->dz = (child_ptr->z - currNode_ptr->z);
-                    if (child_ptr->dx != 0)
-                        child_ptr->dx /= std::abs(child_ptr->dx);
-                    if (child_ptr->dy != 0)
-                        child_ptr->dy /= std::abs(child_ptr->dy);
-                    if (child_ptr->dz != 0)
-                        child_ptr->dz /= std::abs(child_ptr->dz);
+
+                    // BUG FIX: this block used to unconditionally recompute
+                    // child_ptr->dx/dy/dz as sign(child - curr), which is only
+                    // valid for plain A* unit-step grid moves. For JPS, a step
+                    // between parent and child is a multi-cell jump (e.g.
+                    // dx=5), and collapsing that to its sign here corrupts the
+                    // travel direction stored on the state. getJpsSucc() uses
+                    // curr->dx/dy/dz to index into the jn2d_/jn3d_ pruning
+                    // tables on the node's *next* expansion, so a corrupted
+                    // direction silently produces wrong successors/pruning,
+                    // including re-discovering already-CLOSED nodes with a
+                    // lower g -- exactly what triggers "ASTAR ERROR!" below.
+                    // For JPS, dx/dy/dz was already set correctly when the
+                    // child was first allocated (in getJpsSucc, from the
+                    // actual jump direction) and must be left untouched.
+                    if (!use_jps_)
+                    {
+                        child_ptr->dx = (child_ptr->x - currNode_ptr->x);
+                        child_ptr->dy = (child_ptr->y - currNode_ptr->y);
+                        if (!use_2d_)
+                            child_ptr->dz = (child_ptr->z - currNode_ptr->z);
+                        if (child_ptr->dx != 0)
+                            child_ptr->dx /= std::abs(child_ptr->dx);
+                        if (child_ptr->dy != 0)
+                            child_ptr->dy /= std::abs(child_ptr->dy);
+                        if (!use_2d_ && child_ptr->dz != 0)
+                            child_ptr->dz /= std::abs(child_ptr->dz);
+                    }
                 }
                 // if currently in CLOSED
                 else if (child_ptr->opened && child_ptr->closed)
                 {
-                    printf("ASTAR ERROR!\n");
+                    if (verbose_)
+                        printf("ASTAR ERROR! Reopened closed node id=%d\n",
+                               child_ptr->id);
                 }
                 else // new node, add to heap
                 {
