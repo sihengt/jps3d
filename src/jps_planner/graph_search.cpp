@@ -8,7 +8,7 @@ GraphSearch::GraphSearch(const char *cMap, int xDim, int yDim, double eps,
     : cMap_(cMap), xDim_(xDim), yDim_(yDim), eps_(eps), verbose_(verbose)
 {
     hm_.resize(xDim_ * yDim_);
-    seen_.resize(xDim_ * yDim_, false);
+    visited_.resize(xDim_ * yDim_, 0);
 
     for (int x = -1; x <= 1; x++)
     {
@@ -29,7 +29,7 @@ GraphSearch::GraphSearch(const char *cMap, int xDim, int yDim, int zDim,
       verbose_(verbose)
 {
     hm_.resize(xDim_ * yDim_ * zDim_);
-    seen_.resize(xDim_ * yDim_ * zDim_, false);
+    visited_.resize(xDim_ * yDim_ * zDim_, 0);
 
     // Set 3D neighbors
     for (int x = -1; x <= 1; x++)
@@ -102,8 +102,16 @@ bool GraphSearch::plan(int xStart, int yStart, int xGoal, int yGoal,
     use_2d_ = true;
     pq_.clear();
     path_.clear();
-    hm_.resize(xDim_ * yDim_);
-    seen_.resize(xDim_ * yDim_, false);
+
+    current_planning_token_++;
+    if (current_planning_token_ == 0) // wrapped after 65535 plans
+    {
+        std::fill(visited_.begin(), visited_.end(), 0);
+        current_planning_token_ = 1;
+    }
+    current_block_idx_ = 0;
+    current_slot_idx_ = 0;
+
     // Set jps
     use_jps_ = useJps;
 
@@ -114,8 +122,7 @@ bool GraphSearch::plan(int xStart, int yStart, int xGoal, int yGoal,
 
     // Set start node
     int start_id = coordToId(xStart, yStart);
-    StatePtr currNode_ptr =
-        std::make_shared<State>(State(start_id, xStart, yStart, 0, 0));
+    StatePtr currNode_ptr = allocateState(start_id, xStart, yStart, 0, 0);
     currNode_ptr->g = 0;
     currNode_ptr->h = getHeur(xStart, yStart);
 
@@ -128,8 +135,15 @@ bool GraphSearch::plan(int xStart, int yStart, int zStart, int xGoal, int yGoal,
     use_2d_ = false;
     pq_.clear();
     path_.clear();
-    hm_.resize(xDim_ * yDim_ * zDim_);
-    seen_.resize(xDim_ * yDim_ * zDim_, false);
+
+    current_planning_token_++;
+    if (current_planning_token_ == 0) // wrapped after 65535 plans
+    {
+        std::fill(visited_.begin(), visited_.end(), 0);
+        current_planning_token_ = 1;
+    }
+    current_block_idx_ = 0;
+    current_slot_idx_ = 0;
 
     // Set jps
     use_jps_ = useJps;
@@ -141,8 +155,8 @@ bool GraphSearch::plan(int xStart, int yStart, int zStart, int xGoal, int yGoal,
     zGoal_ = zGoal;
     // Set start node
     int start_id = coordToId(xStart, yStart, zStart);
-    StatePtr currNode_ptr = std::make_shared<State>(
-        State(start_id, xStart, yStart, zStart, 0, 0, 0));
+    StatePtr currNode_ptr =
+        allocateState(start_id, xStart, yStart, zStart, 0, 0, 0);
     currNode_ptr->g = 0;
     currNode_ptr->h = getHeur(xStart, yStart, zStart);
 
@@ -156,7 +170,7 @@ bool GraphSearch::plan(StatePtr &currNode_ptr, int maxExpand, int start_id,
     currNode_ptr->heapkey = pq_.push(currNode_ptr);
     currNode_ptr->opened = true;
     hm_[currNode_ptr->id] = currNode_ptr;
-    seen_[currNode_ptr->id] = true;
+    visited_[currNode_ptr->id] = current_planning_token_;
 
     int expand_iteration = 0;
 
@@ -313,11 +327,10 @@ void GraphSearch::getSucc(const StatePtr &curr, std::vector<int> &succ_ids,
                 continue;
 
             int new_id = coordToId(new_x, new_y);
-            if (!seen_[new_id])
+            if (visited_[new_id] != current_planning_token_)
             {
-                seen_[new_id] = true;
-                hm_[new_id] =
-                    std::make_shared<State>(new_id, new_x, new_y, d[0], d[1]);
+                visited_[new_id] = current_planning_token_;
+                hm_[new_id] = allocateState(new_id, new_x, new_y, d[0], d[1]);
                 hm_[new_id]->h = getHeur(new_x, new_y);
             }
 
@@ -336,11 +349,11 @@ void GraphSearch::getSucc(const StatePtr &curr, std::vector<int> &succ_ids,
                 continue;
 
             int new_id = coordToId(new_x, new_y, new_z);
-            if (!seen_[new_id])
+            if (visited_[new_id] != current_planning_token_)
             {
-                seen_[new_id] = true;
-                hm_[new_id] = std::make_shared<State>(new_id, new_x, new_y,
-                                                      new_z, d[0], d[1], d[2]);
+                visited_[new_id] = current_planning_token_;
+                hm_[new_id] = allocateState(new_id, new_x, new_y, new_z,
+                                            d[0], d[1], d[2]);
                 hm_[new_id]->h = getHeur(new_x, new_y, new_z);
             }
 
@@ -391,11 +404,10 @@ void GraphSearch::getJpsSucc(const StatePtr &curr, std::vector<int> &succ_ids,
             }
 
             int new_id = coordToId(new_x, new_y);
-            if (!seen_[new_id])
+            if (visited_[new_id] != current_planning_token_)
             {
-                seen_[new_id] = true;
-                hm_[new_id] =
-                    std::make_shared<State>(new_id, new_x, new_y, dx, dy);
+                visited_[new_id] = current_planning_token_;
+                hm_[new_id] = allocateState(new_id, new_x, new_y, dx, dy);
                 hm_[new_id]->h = getHeur(new_x, new_y);
             }
 
@@ -453,11 +465,11 @@ void GraphSearch::getJpsSucc(const StatePtr &curr, std::vector<int> &succ_ids,
             }
 
             int new_id = coordToId(new_x, new_y, new_z);
-            if (!seen_[new_id])
+            if (visited_[new_id] != current_planning_token_)
             {
-                seen_[new_id] = true;
-                hm_[new_id] = std::make_shared<State>(new_id, new_x, new_y,
-                                                      new_z, dx, dy, dz);
+                visited_[new_id] = current_planning_token_;
+                hm_[new_id] = allocateState(new_id, new_x, new_y, new_z,
+                                            dx, dy, dz);
                 hm_[new_id]->h = getHeur(new_x, new_y, new_z);
             }
 
