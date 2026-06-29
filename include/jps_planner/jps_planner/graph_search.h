@@ -29,8 +29,10 @@ template <class T> struct compare_state
 
 /// Define priority queue
 struct State; // forward declaration
-/// State pointer
-using StatePtr = std::shared_ptr<State>;
+/// State pointer -- raw pointer into GraphSearch's block pool (see
+/// StateBlock/state_pool_ below). Valid for the lifetime of the owning
+/// GraphSearch instance; never individually freed.
+using StatePtr = State *;
 using priorityQueue =
     boost::heap::d_ary_heap<StatePtr, boost::heap::mutable_<true>,
                             boost::heap::arity<2>,
@@ -59,6 +61,8 @@ struct State
     bool opened = false;
     /// if has been closed
     bool closed = false;
+
+    State() = default;
 
     /// 2D constructor
     State(int id, int x, int y, int dx, int dy)
@@ -287,13 +291,58 @@ private:
 
     priorityQueue pq_;
     std::vector<StatePtr> hm_;
-    std::vector<bool> seen_;
+    std::vector<uint16_t> visited_;
+    uint16_t current_planning_token_ = 0;
 
     std::vector<StatePtr> path_;
 
     std::vector<std::vector<int>> ns_;
     std::shared_ptr<JPS2DNeib> jn2d_;
     std::shared_ptr<JPS3DNeib> jn3d_;
+
+    // Block-pool allocator for State objects. Blocks are never freed --
+    // current_block_idx_/current_slot_idx_ rewind to 0 at the start of every
+    // plan() call, so once the pool reaches the largest search's footprint,
+    // later searches reuse existing blocks with zero new heap allocation.
+    // Safe only because GraphSearch persists across plan() calls (Task 8) --
+    // otherwise the pool would be discarded every time.
+    struct StateBlock
+    {
+        std::vector<State> block;
+        StateBlock() { block.resize(10000); }
+    };
+    std::vector<std::unique_ptr<StateBlock>> state_pool_;
+    int current_block_idx_ = 0;
+    int current_slot_idx_ = 0;
+
+    inline StatePtr getNewState()
+    {
+        if (current_block_idx_ >= (int)state_pool_.size())
+            state_pool_.push_back(std::make_unique<StateBlock>());
+        StatePtr ptr = &state_pool_[current_block_idx_]->block[current_slot_idx_];
+        current_slot_idx_++;
+        if (current_slot_idx_ >= 10000)
+        {
+            current_slot_idx_ = 0;
+            current_block_idx_++;
+        }
+        return ptr;
+    }
+
+    inline StatePtr allocateState(int id, int x, int y, int dx, int dy)
+    {
+        StatePtr ptr = getNewState();
+        *ptr = State(id, x, y, dx, dy);
+        return ptr;
+    }
+
+    inline StatePtr allocateState(int id, int x, int y, int z, int dx, int dy,
+                                  int dz)
+    {
+        StatePtr ptr = getNewState();
+        *ptr = State(id, x, y, z, dx, dy, dz);
+        return ptr;
+    }
 };
 } // namespace JPS
 #endif
