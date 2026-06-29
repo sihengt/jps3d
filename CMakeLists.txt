@@ -69,6 +69,10 @@ add_executable(test_map_util_ceiling test/test_map_util_ceiling.cpp)
 target_link_libraries(test_map_util_ceiling jps_lib)
 add_test(test_map_util_ceiling test_map_util_ceiling)
 
+add_executable(test_planner_ceiling test/test_planner_ceiling.cpp)
+target_link_libraries(test_planner_ceiling jps_lib ${YAMLCPP_LIBRARIES})
+add_test(test_planner_ceiling test_planner_ceiling ${CMAKE_SOURCE_DIR}/data/simple3d.yaml)
+
 # add_executable(test_distance_map_planner_2d test/test_distance_map_planner_2d.cpp)
 # target_link_libraries(test_distance_map_planner_2d jps_lib dmp_lib ${YAMLCPP_LIBRARIES} ${Boost_LIBRARIES})
 # add_test(test_distance_map_planner_2d test_distance_map_planner_2d ${CMAKE_SOURCE_DIR}/data/corridor.yaml)
