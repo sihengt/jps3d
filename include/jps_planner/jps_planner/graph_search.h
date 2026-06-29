@@ -175,6 +175,9 @@ public:
     GraphSearch(const char *cMap, int xDim, int yDim, int zDim, double eps = 1,
                 bool verbose = false);
 
+    /// Update the heuristic weight without reconstructing the object
+    void setEps(double eps) { eps_ = eps; }
+
     /**
      * @brief start 2D planning thread
      *
