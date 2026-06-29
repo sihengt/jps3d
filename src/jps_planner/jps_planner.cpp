@@ -239,20 +239,39 @@ bool JPSPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
 
     const Veci<Dim> dim = map_util_->getDim();
 
+    bool dims_changed = !graph_search_;
     if (Dim == 3)
+        dims_changed = dims_changed || dim(0) != graph_search_dim_x_ ||
+                       dim(1) != graph_search_dim_y_ ||
+                       dim(2) != graph_search_dim_z_;
+    else
+        dims_changed = dims_changed || dim(0) != graph_search_dim_x_ ||
+                       dim(1) != graph_search_dim_y_;
+
+    if (dims_changed)
     {
-        graph_search_ = std::make_shared<JPS::GraphSearch>(
-            cmap_.data(), dim(0), dim(1), dim(2), eps, planner_verbose_);
-        graph_search_->plan(start_int(0), start_int(1), start_int(2),
-                            goal_int(0), goal_int(1), goal_int(2), use_jps);
+        if (Dim == 3)
+            graph_search_ = std::make_shared<JPS::GraphSearch>(
+                cmap_.data(), dim(0), dim(1), dim(2), eps, planner_verbose_);
+        else
+            graph_search_ = std::make_shared<JPS::GraphSearch>(
+                cmap_.data(), dim(0), dim(1), eps, planner_verbose_);
+        graph_search_dim_x_ = dim(0);
+        graph_search_dim_y_ = dim(1);
+        if (Dim == 3)
+            graph_search_dim_z_ = dim(2);
     }
     else
     {
-        graph_search_ = std::make_shared<JPS::GraphSearch>(
-            cmap_.data(), dim(0), dim(1), eps, planner_verbose_);
+        graph_search_->setEps(eps);
+    }
+
+    if (Dim == 3)
+        graph_search_->plan(start_int(0), start_int(1), start_int(2),
+                            goal_int(0), goal_int(1), goal_int(2), use_jps);
+    else
         graph_search_->plan(start_int(0), start_int(1), goal_int(0),
                             goal_int(1), use_jps);
-    }
 
     const auto path = graph_search_->getPath();
     if (path.size() < 1)
