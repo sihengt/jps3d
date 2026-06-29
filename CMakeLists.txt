@@ -86,6 +86,8 @@ install(TARGETS jps3d_node
 
 install(PROGRAMS
   scripts/rviz_goal_client.py
+  scripts/waypoint_sequencer.py
+  scripts/waypoint_sequencer_logic.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

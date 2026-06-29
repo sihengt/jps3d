@@ -3,12 +3,12 @@
 Jps3dNode::Jps3dNode() : Node("jps3d_node")
 {
     // Declare all parameters
-    this->declare_parameter<double>("map_origin_x", -30.0);
-    this->declare_parameter<double>("map_origin_y", -30.0);
+    this->declare_parameter<double>("map_origin_x", -20.0);
+    this->declare_parameter<double>("map_origin_y", -20.0);
     this->declare_parameter<double>("map_origin_z", 0.0);
-    this->declare_parameter<double>("map_size_x", 60.0);
-    this->declare_parameter<double>("map_size_y", 60.0);
-    this->declare_parameter<double>("map_size_z", 20.0);
+    this->declare_parameter<double>("map_size_x", 40.0);
+    this->declare_parameter<double>("map_size_y", 40.0);
+    this->declare_parameter<double>("map_size_z", 10.0);
     this->declare_parameter<double>("map_resolution", 0.1); // .05 for super
     this->declare_parameter<double>("eps", 1.0);
     this->declare_parameter<bool>("use_jps", true);
