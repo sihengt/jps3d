@@ -1,0 +1,13 @@
+/**:
+  ros__parameters:
+    map_origin_x: -10.0
+    map_origin_y: -22.0
+    map_origin_z: 0.0
+    map_size_x: 25.0
+    map_size_y: 22.0
+    map_size_z: 5.0
+    map_resolution: 0.1
+    eps: 1.0
+    ceiling_height_z: 3.3
+    block_unknown: false
+    inflate_cell_size: 6

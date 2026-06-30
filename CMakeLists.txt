@@ -22,6 +22,8 @@ find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(octomap_msgs REQUIRED)
+find_package(octomap REQUIRED)
 
 PKG_CHECK_MODULES(YAMLCPP REQUIRED yaml-cpp)
 if(YAMLCPP_FOUND)
@@ -47,9 +49,11 @@ target_include_directories(jps3d_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
 target_compile_features(jps3d_node PUBLIC c_std_99 cxx_std_17)
-target_link_libraries(jps3d_node jps_lib)
+target_include_directories(jps3d_node PUBLIC ${OCTOMAP_INCLUDE_DIRS})
+target_link_libraries(jps3d_node jps_lib ${OCTOMAP_LIBRARIES})
 ament_target_dependencies(jps3d_node
-  rclcpp nav_msgs geometry_msgs sensor_msgs visualization_msgs std_msgs)
+  rclcpp nav_msgs geometry_msgs sensor_msgs visualization_msgs std_msgs
+  octomap_msgs octomap)
 
 include(CTest)
 
@@ -98,5 +102,10 @@ install(PROGRAMS
   scripts/waypoint_sequencer_logic.py
   DESTINATION lib/${PROJECT_NAME}
 )
+
+install(DIRECTORY launch/
+  DESTINATION share/${PROJECT_NAME}/launch
+)
+install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
 
 ament_package()
