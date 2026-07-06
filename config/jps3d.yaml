@@ -10,4 +10,4 @@
     eps: 1.0
     ceiling_height_z: 3.3
     block_unknown: false
-    inflate_cell_size: 6
+    inflate_cell_size: 5

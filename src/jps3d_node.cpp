@@ -322,14 +322,15 @@ void Jps3dNode::plan_callback(
     if (success) {
         path_pts = planner_->getPath();
     } else {
+        return;
         // Goal not free / unreachable (e.g. it sits in unobserved or occupied space). Rather than give
         // up, head straight at the goal and let the frontier truncation below cut the line at the first
         // unknown/occupied cell -- i.e. get as close to the goal as observed-free space allows.
-        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-            "plan() failed (status %d); greedy straight-line toward goal, truncated at frontier.",
-            static_cast<int>(planner_->status()));
-        path_pts.push_back(start);
-        path_pts.push_back(goal);
+        // RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+        //     "plan() failed (status %d); greedy straight-line toward goal, truncated at frontier.",
+        //     static_cast<int>(planner_->status()));
+        // path_pts.push_back(start);
+        // path_pts.push_back(goal);
     }
 
     // Frontier-toward-goal: the path above was found on the optimistic map (unknown=free), so it may
