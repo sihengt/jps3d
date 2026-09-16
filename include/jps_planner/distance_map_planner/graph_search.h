@@ -70,36 +70,33 @@ struct State
  *
  * Implement A* and Jump Point Search
  */
-class GraphSearch
+template <int Dim> class GraphSearch
 {
 public:
     /**
-     * @brief 2D graph search constructor
+     * @brief graph search constructor
      *
-     * @param cMap 1D array stores the occupancy, with the order equal to \f$x +
-     * xDim * y\f$
-     * @param xDim map length
-     * @param yDim map width
-     * @param eps weight of heuristic, optional, default as 1
-     * @param cweight weight of distance cost, optional, default as 0.1
-     * @param verbose flag for printing debug info, optional, default as false
-     */
-    GraphSearch(const int8_t *cMap, int xDim, int yDim, double eps = 1,
-                double cweight = 0.1, bool verbose = false);
-    /**
-     * @brief 3D graph search constructor
-     *
-     * @param cMap 1D array stores the occupancy, with the order equal to \f$x +
-     * xDim * y + xDim * yDim * z\f$
-     * @param xDim map length
-     * @param yDim map width
-     * @param zDim map height
+     * @param map_util map util for collision checking
      * @param eps weight of heuristic, optional, default as 1
      * @param cweight weight of distance cost, optional, default as 0.1
      * @param verbose flag for printing debug info, optional, default as False
+     * @param thresh_dist cells with value >= this are considered free,
+     * optional, default as 0
+     * @param h_max max potential value, optional, default as 100
+     * @param potential_radius maximum radius of concern for potential
+     * calculation, optional, default as 0.5
+     * @param pow power index for potential calculation, optional, default as 1
      */
-    GraphSearch(const int8_t *cMap, int xDim, int yDim, int zDim,
-                double eps = 1, double cweight = 0.1, bool verbose = false);
+    GraphSearch(const std::shared_ptr<JPS::MapUtil<Dim>> &map_util,
+                double eps = 1, double cweight = 0.1, bool verbose = false,
+                JPS::TmapValue thresh_dist = 0, JPS::TmapValue h_max = 100,
+                JPS::TmapValue potential_radius = 0.5, int pow = 1);
+
+    /// Set thresh_dist_
+    void setThreshDist(JPS::TmapValue thresh_dist)
+    {
+        thresh_dist_ = thresh_dist;
+    }
 
     /**
      * @brief start 2D planning thread
@@ -163,9 +160,9 @@ private:
     /// Check if (x, y, z) is free
     bool isFree(int x, int y, int z) const;
 
-    /// Clculate heuristic
+    /// Calculate heuristic
     double getHeur(int x, int y) const;
-    /// Clculate heuristic
+    /// Calculate heuristic
     double getHeur(int x, int y, int z) const;
 
     const int8_t *cMap_;

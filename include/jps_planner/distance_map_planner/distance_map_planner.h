@@ -25,28 +25,30 @@ public:
     /**
      * @brief set a prior path and get region around it
      * @param path prior path
-     * @param r radius in x-y plane
-     * @param h height in z axis, if 2d, it's not used
+     * @param radius isotropic radius around the path
      * @param dense if true, dont need to do rayTrace
      *
      * it returns the inflated region
      */
 
     std::vector<bool> setPath(const vec_Vecf<Dim> &path,
-                              const Vecf<Dim> &radius, bool dense);
+                              const JPS::TmapValue &radius, bool dense);
 
     /// Set search radius around a prior path
-    void setSearchRadius(const Vecf<Dim> &r);
+    void setSearchRadius(const JPS::TmapValue &r);
     /// Set potential radius
-    void setPotentialRadius(const Vecf<Dim> &r);
-    /// Set the range of potential map, 0 means the whole map
-    void setPotentialMapRange(const Vecf<Dim> &r);
+    void setPotentialRadius(const JPS::TmapValue &r);
     /// Set heuristic weight
     void setEps(double eps);
     /// Set collision cost weight
     void setCweight(double c);
     /// Set the power of potential function \f$H_{MAX}(1 - d/d_{max})^{pow}\f$
     void setPow(int pow);
+    // TODO: improve the description
+    /// Set max potential value
+    void setHMax(JPS::TmapValue h_max);
+    /// Set thresh_dist_
+    void setThreshDist(JPS::TmapValue val) { thresh_dist_ = val; }
 
     /**
      * @brief Status of the planner
@@ -78,13 +80,11 @@ public:
     /**
      * @brief Generate distance map
      * @param map_util MapUtil that contains the map object
-     * @param pos center of the distance map
      *
-     * it copies the map object, thus change the original map_uitl won't affect
-     * the internal map.
+     * It shares the map_util, so changes to the original map_util will affect
+     * the internal map. The planner itself does not modify the map_util.
      */
-    void setMap(const std::shared_ptr<JPS::MapUtil<Dim>> &map_util,
-                const Vecf<Dim> &pos);
+    void setMap(const std::shared_ptr<JPS::MapUtil<Dim>> &map_util);
 
     /// Compute the optimal path
     bool computePath(const Vecf<Dim> &start, const Vecf<Dim> &goal,
@@ -92,7 +92,7 @@ public:
 
 protected:
     /// Create the mask for potential distance field
-    vec_E<std::pair<Veci<Dim>, int8_t>> createMask(int pow);
+    vec_E<std::pair<Veci<Dim>, JPS::TmapValue>> createMask(int pow);
     /// Need to be specified in Child class, main planning function
     bool plan(const Vecf<Dim> &start, const Vecf<Dim> &goal, decimal_t eps = 1,
               decimal_t cweight = 0.1);
@@ -109,8 +109,14 @@ protected:
     std::shared_ptr<DMP::GraphSearch> graph_search_;
     /// tunnel for visualization
     std::vector<bool> search_region_;
-    /// 1-D map array
-    std::vector<int8_t> cmap_;
+    /// Shared pointer aliasing map_util_'s map data, avoids copying while
+    /// keeping map_util_ alive
+    std::shared_ptr<const JPS::Tmap> cmap_;
+    /// Cached spherical mask offsets used by setPath(), keyed on the radius
+    /// that produced it
+    vec_Veci<Dim> cached_mask_;
+    JPS::TmapValue cached_mask_radius_ =
+        std::numeric_limits<JPS::TmapValue>::quiet_NaN();
 
     /// Enabled for printing info
     bool planner_verbose_;
@@ -125,13 +131,15 @@ protected:
     /// Flag indicating the success of planning
     int status_ = 0;
     /// max potential value
-    int8_t H_MAX{100};
+    JPS::TmapValue H_MAX{100};
+    /// Distance >= thresh_dist_ are considered free
+    JPS::TmapValue thresh_dist_{0};
     /// heuristic weight
     double eps_{0.0};
-    /// potential weight
+    /// potential weights
     double cweight_{0.1};
-    /// radius of distance field
-    Vecf<Dim> potential_radius_{Vecf<Dim>::Zero()};
+    /// maximum radius of concern, any further not important
+    JPS::TmapValue potential_radius_{0.5};
     /// radius of searching tunnel
     Vecf<Dim> search_radius_{Vecf<Dim>::Zero()};
     /// xy range of local distance map

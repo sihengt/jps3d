@@ -13,7 +13,8 @@
 namespace JPS
 {
 /// The type of map data Tmap is defined as a 1D array
-using Tmap = std::vector<signed char>;
+using TmapValue = signed char;
+using Tmap = std::vector<TmapValue>;
 /**
  * @biref The map util class for collision checking
  * @param Dim is the dimension of the workspace
