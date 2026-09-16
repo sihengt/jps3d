@@ -40,8 +40,6 @@ public:
     vec_Vecf<Dim> removeLinePts(const vec_Vecf<Dim> &path);
     /// Remove some corner waypoints
     vec_Vecf<Dim> removeCornerPts(const vec_Vecf<Dim> &path);
-    /// Must be called before run the planning thread
-    void updateMap();
     /// Planning function
     bool plan(const Vecf<Dim> &start, const Vecf<Dim> &goal, decimal_t eps = 1,
               bool use_jps = true);
@@ -51,6 +49,13 @@ public:
     vec_Vecf<Dim> getCloseSet() const;
     /// Get all the nodes
     vec_Vecf<Dim> getAllSet() const;
+    /// Set thresh_dist_
+    void setThreshDist(JPS::TmapValue val)
+    {
+        thresh_dist_ = val;
+        if (graph_search_)
+            graph_search_->setThreshDist(val);
+    }
 
 protected:
     /// Assume using 3D voxel map for all 2d and 3d planning
@@ -70,8 +75,12 @@ protected:
     int status_ = 0;
     /// Enabled for printing info
     bool planner_verbose_;
-    /// 1-D map array
-    std::vector<char> cmap_;
+    /// Shared pointer aliasing map_util_'s map data, avoids copying while
+    /// keeping map_util_ alive
+    std::shared_ptr<const JPS::Tmap> cmap_;
+    /// TODO: to refactor
+    /// Distance >= thresh_dist_ are considered free
+    JPS::TmapValue thresh_dist_ = 0;
 };
 
 /// Planner for 2D OccMap

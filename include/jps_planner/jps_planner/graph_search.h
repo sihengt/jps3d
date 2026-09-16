@@ -7,20 +7,39 @@
 #define JPS_GRAPH_SEARCH_H
 
 #include <boost/heap/d_ary_heap.hpp> // boost::heap::d_ary_heap
-#include <limits>                    // std::numeric_limits
-#include <memory>                    // std::shared_ptr
-#include <unordered_map>             // std::unordered_map
-#include <vector>                    // std::vector
+#include <jps_collision/map_util.h>
+#include <limits>        // std::numeric_limits
+#include <memory>        // std::shared_ptr
+#include <unordered_map> // std::unordered_map
+#include <vector>        // std::vector
 
 namespace JPS
 {
+// Heuristic weight used by compare_state's piecewise f-value below.
+// Set from GraphSearch::eps_ (via setEps()/ctor) since compare_state is a
+// free struct with no access to the owning GraphSearch instance.
+extern double g_heur_weight;
+
 /// Heap element comparison
 template <class T> struct compare_state
 {
+    // XDP/A*_epsilon-style smoothing of the weighted heuristic:
+    //   h > g : f = g + h
+    //   h <= g: f = (g + (2w - 1) * h) / w
+    // Degrades to plain weighted-A* (f = g + w*h) when h > g dominates
+    // near the goal, while staying closer to Dijkstra-consistent
+    // ordering away from the goal where h <= g. a->h is the raw
+    // (unweighted) heuristic; w comes from the active search's eps_.
+    static double fval(const T &a)
+    {
+        double g = a->g, h = a->h, w = g_heur_weight;
+        return (h > g) ? (g + h) : ((g + (2.0 * w - 1.0) * h) / w);
+    }
+
     bool operator()(T a1, T a2) const
     {
-        double f1 = a1->g + a1->h;
-        double f2 = a2->g + a2->h;
+        double f1 = fval(a1);
+        double f2 = fval(a2);
         if ((f1 >= f2 - 0.000001) && (f1 <= f2 + 0.000001))
             return a1->g < a2->g; // if equal compare gvals
         return f1 > f2;
@@ -68,12 +87,20 @@ struct State
     State(int id, int x, int y, int dx, int dy)
         : id(id), x(x), y(y), dx(dx), dy(dy)
     {
+        parentId = -1;
+        g = std::numeric_limits<double>::infinity();
+        opened = false;
+        closed = false;
     }
 
     /// 3D constructor
     State(int id, int x, int y, int z, int dx, int dy, int dz)
         : id(id), x(x), y(y), z(z), dx(dx), dy(dy), dz(dz)
     {
+        parentId = -1;
+        g = std::numeric_limits<double>::infinity();
+        opened = false;
+        closed = false;
     }
 };
 
@@ -146,37 +173,45 @@ private:
  *
  * Implement A* and Jump Point Search
  */
-class GraphSearch
+template <int Dim> class GraphSearch
 {
 public:
     /**
      * @brief 2D graph search constructor
      *
-     * @param cMap 1D array stores the occupancy, with the order equal to \f$x +
-     * xDim * y\f$
+     * @param map_util map util used for collision checking
      * @param xDim map length
      * @param yDim map width
      * @param eps weight of heuristic, optional, default as 1
      * @param verbose flag for printing debug info, optional, default as false
      */
-    GraphSearch(const char *cMap, int xDim, int yDim, double eps = 1,
-                bool verbose = false);
+    GraphSearch(const std::shared_ptr<MapUtil<Dim>> &map_util, int xDim,
+                int yDim, double eps = 1, bool verbose = false);
     /**
      * @brief 3D graph search constructor
      *
-     * @param cMap 1D array stores the occupancy, with the order equal to \f$x +
-     * xDim * y + xDim * yDim * z\f$
+     * @param map_util map util used for collision checking
      * @param xDim map length
      * @param yDim map width
      * @param zDim map height
      * @param eps weight of heuristic, optional, default as 1
      * @param verbose flag for printing debug info, optional, default as False
      */
-    GraphSearch(const char *cMap, int xDim, int yDim, int zDim, double eps = 1,
-                bool verbose = false);
+    GraphSearch(const std::shared_ptr<MapUtil<Dim>> &map_util, int xDim,
+                int yDim, int zDim, double eps = 1, bool verbose = false);
 
-    /// Update the heuristic weight without reconstructing the object
-    void setEps(double eps) { eps_ = eps; }
+    /// TODO: to refactor
+    /// Set thresh_dist_
+    void setThreshDist(TmapValue thresh_dist) { thresh_dist_ = thresh_dist; }
+
+    /// Set the heuristic weight. The GraphSearch is now built once and
+    /// reused across plans (see JPSPlanner::setMapUtil), so eps must be
+    /// settable per-plan rather than fixed at construction.
+    void setEps(double eps)
+    {
+        eps_ = eps;
+        g_heur_weight = eps;
+    }
 
     /**
      * @brief start 2D planning thread
@@ -282,12 +317,13 @@ private:
     static constexpr double SQRT2 = 1.41421356237309504;
     static constexpr double SQRT3 = 1.73205080756887729;
 
-    const char *cMap_;
+    std::shared_ptr<MapUtil<Dim>> map_util_;
+    std::shared_ptr<const Tmap> cMap_;
     int xDim_, yDim_, zDim_;
+    TmapValue thresh_dist_ = 0;
     double eps_;
     bool verbose_;
 
-    const char val_free_ = 0;
     int xGoal_, yGoal_, zGoal_;
     bool use_2d_;
     bool use_jps_ = false;
@@ -298,6 +334,10 @@ private:
     uint16_t current_planning_token_ = 0;
 
     std::vector<StatePtr> path_;
+
+    // Precomputed constants — avoids recomputing sqrt(2) and sqrt(3) each call
+    static constexpr double SQRT2 = 1.41421356237309504;
+    static constexpr double SQRT3 = 1.73205080756887729;
 
     std::vector<std::vector<int>> ns_;
     std::shared_ptr<JPS2DNeib> jn2d_;
@@ -324,7 +364,8 @@ private:
     {
         if (current_block_idx_ >= (int)state_pool_.size())
             state_pool_.push_back(std::make_unique<StateBlock>());
-        StatePtr ptr = &state_pool_[current_block_idx_]->block[current_slot_idx_];
+        StatePtr ptr =
+            &state_pool_[current_block_idx_]->block[current_slot_idx_];
         current_slot_idx_++;
         if (current_slot_idx_ >= kStateBlockSize)
         {

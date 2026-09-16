@@ -7,6 +7,7 @@
 #define DMP_GRAPH_SEARCH_H
 
 #include <boost/heap/d_ary_heap.hpp> // boost::heap::d_ary_heap
+#include <jps_collision/map_util.h>  // For JPS::TmapValue
 #include <limits>                    // std::numeric_limits
 #include <memory>                    // std::shared_ptr
 #include <unordered_map>             // std::unordered_map
@@ -43,7 +44,7 @@ struct State
     int id;
     /// Coord
     int x, y, z = 0;
-    /// id of predicessors
+    /// id of predecessors
     int parentId = -1;
 
     /// pointer to heap location
@@ -165,28 +166,45 @@ private:
     /// Calculate heuristic
     double getHeur(int x, int y, int z) const;
 
-    const int8_t *cMap_;
+    std::shared_ptr<JPS::MapUtil<Dim>> map_util_;
+    // Raw cost map, aliased to map_util_->map_ (shared, never modified)
+    std::shared_ptr<const JPS::Tmap> cMap_;
     int xDim_, yDim_, zDim_;
+    // TODO: to refactor variable name
+    JPS::TmapValue thresh_dist_ = 0;
     /// weight of heuristic
     double eps_;
     /// weight of distance map
     double cweight_;
+    /// max potential value
+    JPS::TmapValue H_MAX;
+    /// maximum radius of concern, any further not important
+    JPS::TmapValue potential_radius_;
+    /// power index for potential calculation
+    int pow_;
     bool verbose_;
 
-    const int8_t val_free_ = 0;
-    const int8_t val_occ_ = 100;
     int xGoal_, yGoal_, zGoal_;
     bool use_2d_;
     bool global_;
 
     priorityQueue pq_;
     std::vector<StatePtr> hm_;
-    std::vector<bool> seen_;
+    std::vector<uint16_t> visited_;
+    uint16_t current_planning_token_ = 0;
     std::vector<bool> in_region_;
 
     std::vector<StatePtr> path_;
 
-    std::vector<std::vector<int>> ns_;
+    /// Precomputed neighbor offset + its Euclidean grid-step distance
+    /// (only ever 1, sqrt(2), or sqrt(3) for a 3x3(x3) stencil), so
+    /// getSucc() doesn't recompute sqrt() per successor per expansion.
+    struct Neighbor
+    {
+        int dx, dy, dz;
+        double dist;
+    };
+    std::vector<Neighbor> ns_;
 };
 } // namespace DMP
 #endif

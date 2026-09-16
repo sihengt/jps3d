@@ -47,6 +47,7 @@ public:
     // TODO: improve the description
     /// Set max potential value
     void setHMax(JPS::TmapValue h_max);
+    // TODO: to refactor variable and function name
     /// Set thresh_dist_
     void setThreshDist(JPS::TmapValue val) { thresh_dist_ = val; }
 
