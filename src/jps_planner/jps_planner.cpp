@@ -8,13 +8,6 @@ JPSPlanner<Dim>::JPSPlanner(bool verbose) : planner_verbose_(verbose)
         printf(ANSI_COLOR_CYAN "JPS PLANNER VERBOSE ON\n" ANSI_COLOR_RESET);
 }
 
-template <int Dim>
-void JPSPlanner<Dim>::setMapUtil(
-    const std::shared_ptr<JPS::MapUtil<Dim>> &map_util)
-{
-    map_util_ = map_util;
-}
-
 template <int Dim> int JPSPlanner<Dim>::status() { return status_; }
 
 template <int Dim> vec_Vecf<Dim> JPSPlanner<Dim>::getPath() { return path_; }
@@ -198,6 +191,8 @@ bool JPSPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
     status_ = 0;
 
     const Veci<Dim> start_int = map_util_->floatToInt(start);
+
+    // Early exits if the start index in the JPS3D map is not free
     if (!map_util_->isFree(start_int))
     {
         if (planner_verbose_)
@@ -220,6 +215,7 @@ bool JPSPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
         return false;
     }
 
+    // Early exits if the goal index is not free
     const Veci<Dim> goal_int = map_util_->floatToInt(goal);
     if (!map_util_->isFree(goal_int))
     {
@@ -255,7 +251,7 @@ bool JPSPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
                 cmap_.data(), dim(0), dim(1), dim(2), eps, planner_verbose_);
         else
             graph_search_ = std::make_shared<JPS::GraphSearch>(
-                cmap_.data(), dim(0), dim(1), eps, planner_verbose_);
+            cmap_.data(), dim(0), dim(1), eps, planner_verbose_);
         graph_search_dim_x_ = dim(0);
         graph_search_dim_y_ = dim(1);
         if (Dim == 3)

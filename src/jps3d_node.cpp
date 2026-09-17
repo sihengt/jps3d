@@ -80,7 +80,7 @@ void Jps3dNode::init_map()
     double res = this->get_parameter("map_resolution").as_double();
 
     if (res <= 0.0) {
-        RCLCPP_FATAL(this->get_logger(), "map_resolution must be > 0, got %f", res);
+        RCLCPP_FATAL(this->get_lgger(), "map_resolution must be > 0, got %f", res);
         throw std::invalid_argument("map_resolution must be positive");
     }
 
@@ -167,8 +167,7 @@ void Jps3dNode::voxel_callback(const sensor_msgs::msg::PointCloud2::SharedPtr ms
 
     planner_->updateMap();
 
-    // Publish a single CUBE_LIST marker instead of one marker per voxel.
-    // This is orders of magnitude faster to render in RViz.
+    // Publish a single CUBE_LIST marker for visualization
     visualization_msgs::msg::Marker cube_list;
     cube_list.header      = msg->header;
     cube_list.ns          = "jps3d_voxels";
@@ -195,6 +194,7 @@ void Jps3dNode::voxel_callback(const sensor_msgs::msg::PointCloud2::SharedPtr ms
         "Voxel map updated: %d raw, %zu after inflation", marked, occ.size());
 }
 
+// TODO: problematic
 void Jps3dNode::octomap_callback(const octomap_msgs::msg::Octomap::SharedPtr msg)
 {
     // Deserialize the full octree (carries occupied / free / unknown, unlike the occupied-only cloud).
@@ -301,7 +301,7 @@ void Jps3dNode::plan_callback(
         request->goal.pose.position.y,
         request->goal.pose.position.z);
 
-    // Quick check to see if frame_ids have been set on start / goal. No point doing the rest otherwise.
+    // Quick check to see if frame_ids have been set on start / goal.
     std::string frame_id = request->start.header.frame_id.empty()
         ? request->goal.header.frame_id
         : request->start.header.frame_id;
@@ -318,26 +318,15 @@ void Jps3dNode::plan_callback(
     // Plan on the (optimistic) map.
     bool success = planner_->plan(start, goal, eps, use_jps);
 
+    // early exits if there is no path found on the optimistic map
     vec_Vec3f path_pts;
     if (success) {
         path_pts = planner_->getPath();
     } else {
         return;
-        // Goal not free / unreachable (e.g. it sits in unobserved or occupied space). Rather than give
-        // up, head straight at the goal and let the frontier truncation below cut the line at the first
-        // unknown/occupied cell -- i.e. get as close to the goal as observed-free space allows.
-        // RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-        //     "plan() failed (status %d); greedy straight-line toward goal, truncated at frontier.",
-        //     static_cast<int>(planner_->status()));
-        // path_pts.push_back(start);
-        // path_pts.push_back(goal);
     }
 
-    // Frontier-toward-goal: the path above was found on the optimistic map (unknown=free), so it may
-    // run through never-observed space. Walk it from the start and cut it at the first cell that is
-    // unknown or occupied in the true 3-state map -> the drone only ever commits to observed-free
-    // space, advances to the frontier, observes more, and replans. A small seed radius around the
-    // start is always treated as free so the drone's own (possibly unobserved) cell can't stall it.
+    // JPS3D above plans through unknown space. For safety, clip it at the latest point which is known.
     if (block_unknown_ && !true_map_.empty() && path_pts.size() >= 2) {
         const double step = std::max(0.5 * map_util_->getRes(), 1e-3);
         auto cell_state = [&](const Vec3f & p) -> int8_t {
