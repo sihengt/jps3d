@@ -18,16 +18,15 @@ template <int Dim> void DMPlanner<Dim>::setPotentialRadius(const Vecf<Dim> &r)
     potential_radius_ = r;
 }
 
-template <int Dim> void DMPlanner<Dim>::setPotentialMapRange(const Vecf<Dim> &r)
-{
-    potential_map_range_ = r;
-}
-
 template <int Dim> void DMPlanner<Dim>::setEps(double eps) { eps_ = eps; }
 
 template <int Dim> void DMPlanner<Dim>::setCweight(double c) { cweight_ = c; }
 
 template <int Dim> void DMPlanner<Dim>::setPow(int pow) { pow_ = pow; }
+template <int Dim> void DMPlanner<Dim>::setHMax(JPS::TmapValue h_max)
+{
+    H_MAX = h_max;
+}
 
 template <int Dim> int DMPlanner<Dim>::status() { return status_; }
 
@@ -49,7 +48,6 @@ vec_Vecf<Dim> DMPlanner<Dim>::removeCornerPts(const vec_Vecf<Dim> &path)
     if (path.size() < 3)
         return path;
 
-    int8_t val = 1;
     // cut zigzag segment
     vec_Vecf<Dim> optimized_path;
     Vecf<Dim> pose1 = path[0];
@@ -58,7 +56,7 @@ vec_Vecf<Dim> DMPlanner<Dim>::removeCornerPts(const vec_Vecf<Dim> &path)
     optimized_path.push_back(pose1);
     decimal_t cost1, cost2, cost3;
 
-    if (!map_util_->isBlocked(pose1, pose2, val))
+    if (!map_util_->isBlocked(pose1, pose2))
         cost1 = (pose1 - pose2).norm();
     else
         cost1 = std::numeric_limits<decimal_t>::infinity();
@@ -67,12 +65,12 @@ vec_Vecf<Dim> DMPlanner<Dim>::removeCornerPts(const vec_Vecf<Dim> &path)
     {
         pose1 = path[i];
         pose2 = path[i + 1];
-        if (!map_util_->isBlocked(pose1, pose2, val))
+        if (!map_util_->isBlocked(pose1, pose2))
             cost2 = (pose1 - pose2).norm();
         else
             cost2 = std::numeric_limits<decimal_t>::infinity();
 
-        if (!map_util_->isBlocked(prev_pose, pose2, val))
+        if (!map_util_->isBlocked(prev_pose, pose2))
             cost3 = (prev_pose - pose2).norm();
         else
             cost3 = std::numeric_limits<decimal_t>::infinity();
@@ -202,7 +200,7 @@ std::vector<bool> DMPlanner<Dim>::setPath(const vec_Vecf<Dim> &path,
     auto dim = map_util_->getDim();
     std::vector<bool> in_region;
     // if radius is negative, set no tunnel
-    if (radius(0) < 0 || radius(1) < 0)
+    if (radius < 0)
     {
         if (Dim == 2)
             in_region.resize(dim(0) * dim(1), true);
@@ -217,37 +215,49 @@ std::vector<bool> DMPlanner<Dim>::setPath(const vec_Vecf<Dim> &path,
         in_region.resize(dim(0) * dim(1) * dim(2), false);
 
     // create mask
+    // The spherical offset mask only depends on radius (and resolution, which
+    // is fixed for a given map_util_), so cache it across calls instead of
+    // rebuilding it every time setPath() runs (e.g. once per iteration in
+    // IterativeDMPlanner::iterativeComputePath).
     vec_Veci<Dim> ns;
-    int rn = std::ceil(radius(0) / map_util_->getRes());
-    if (Dim == 2)
+    if (radius == cached_mask_radius_)
     {
-        for (int nx = -rn; nx <= rn; nx++)
-        {
-            for (int ny = -rn; ny <= rn; ny++)
-            {
-                if (std::hypot(nx, ny) > rn)
-                    continue;
-                ns.push_back(Veci<Dim>(nx, ny));
-            }
-        }
+        ns = cached_mask_;
     }
     else
     {
-        int hn = std::ceil(radius(2) / map_util_->getRes());
-        for (int nx = -rn; nx <= rn; nx++)
+        int rn = std::ceil(radius / map_util_->getRes());
+        if (Dim == 2)
         {
-            for (int ny = -rn; ny <= rn; ny++)
+            for (int nx = -rn; nx <= rn; nx++)
             {
-                for (int nz = -hn; nz <= hn; nz++)
+                for (int ny = -rn; ny <= rn; ny++)
                 {
                     if (std::hypot(nx, ny) > rn)
                         continue;
-                    Veci<Dim> n;
-                    n << nx, ny, nz;
-                    ns.push_back(n);
+                    ns.push_back(Veci<Dim>(nx, ny));
                 }
             }
         }
+        else
+        {
+            for (int nx = -rn; nx <= rn; nx++)
+            {
+                for (int ny = -rn; ny <= rn; ny++)
+                {
+                    for (int nz = -rn; nz <= rn; nz++)
+                    {
+                        if (std::hypot(nx, ny) > rn)
+                            continue;
+                        Veci<Dim> n;
+                        n << nx, ny, nz;
+                        ns.push_back(n);
+                    }
+                }
+            }
+        }
+        cached_mask_ = ns;
+        cached_mask_radius_ = radius;
     }
 
     for (const auto &it : ps)
@@ -257,9 +267,7 @@ std::vector<bool> DMPlanner<Dim>::setPath(const vec_Vecf<Dim> &path,
             Veci<Dim> pn = it + n;
             if (map_util_->isOutside(pn))
                 continue;
-            int idx = Dim == 2
-                          ? pn(0) + dim(0) * pn(1)
-                          : pn(0) + dim(0) * pn(1) + dim(0) * dim(1) * pn(2);
+            int idx = map_util_->getIndex(pn);
             if (!in_region[idx])
             {
                 in_region[idx] = true;
@@ -275,13 +283,16 @@ template <int Dim> vec_Vecf<Dim> DMPlanner<Dim>::getSearchRegion()
     auto dim = map_util_->getDim();
     vec_Vecf<Dim> pts;
 
+    if (search_region_.empty())
+        return pts;
+
     if (Dim == 2)
     {
         for (int nx = 0; nx < dim(0); nx++)
         {
             for (int ny = 0; ny < dim(1); ny++)
             {
-                int idx = nx + dim(0) * ny;
+                int idx = map_util_->getIndex(Veci<Dim>(nx, ny));
                 if (search_region_[idx])
                     pts.push_back(map_util_->intToFloat(Veci<Dim>(nx, ny)));
             }
@@ -295,13 +306,11 @@ template <int Dim> vec_Vecf<Dim> DMPlanner<Dim>::getSearchRegion()
             {
                 for (int nz = 0; nz < dim(2); nz++)
                 {
-                    int idx = nx + dim(0) * ny + dim(0) * dim(1) * nz;
+                    Veci<Dim> n;
+                    n << nx, ny, nz;
+                    int idx = map_util_->getIndex(n);
                     if (search_region_[idx])
-                    {
-                        Veci<Dim> n;
-                        n << nx, ny, nz;
                         pts.push_back(map_util_->intToFloat(n));
-                    }
                 }
             }
         }
@@ -337,7 +346,8 @@ template <int Dim> bool DMPlanner<Dim>::checkAvailability(const Veci<Dim> &pn)
         }
         return false;
     }
-    if (cmap_[map_util_->getIndex(pn)] == 100)
+    int linear_idx = map_util_->getIndex(pn);
+    if (!map_util_->isFree(linear_idx, thresh_dist_))
     {
         if (planner_verbose_)
             printf(ANSI_COLOR_RED "point is occupied!\n" ANSI_COLOR_RESET);
@@ -348,7 +358,12 @@ template <int Dim> bool DMPlanner<Dim>::checkAvailability(const Veci<Dim> &pn)
 
 template <int Dim> vec_Vec3f DMPlanner<Dim>::getCloud(double h_max)
 {
-    auto data = map_util_->getMap();
+    if (!cmap_)
+        return {};
+    auto data = *cmap_;
+    if (data.empty())
+        return {};
+
     auto dim = map_util_->getDim();
     vec_Vec3f ps;
 
@@ -555,7 +570,7 @@ bool DMPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
     status_ = 0;
 
     /// check if the map exists
-    if (cmap_.empty())
+    if (!cmap_ || cmap_->empty())
     {
         if (planner_verbose_)
             printf(ANSI_COLOR_RED
@@ -586,19 +601,18 @@ bool DMPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
 
     const Veci<Dim> dim = map_util_->getDim();
 
+    graph_search_ = std::make_shared<DMP::GraphSearch<Dim>>(
+        map_util_, eps, cweight, planner_verbose_, thresh_dist_, H_MAX,
+        potential_radius_, pow_);
+
     if (Dim == 3)
     {
-        graph_search_ = std::make_shared<DMP::GraphSearch>(
-            cmap_.data(), dim(0), dim(1), dim(2), eps, cweight,
-            planner_verbose_);
         path_cost_ = graph_search_->plan(start_int(0), start_int(1),
                                          start_int(2), goal_int(0), goal_int(1),
                                          goal_int(2), search_region_);
     }
     else
     {
-        graph_search_ = std::make_shared<DMP::GraphSearch>(
-            cmap_.data(), dim(0), dim(1), eps, cweight, planner_verbose_);
         path_cost_ =
             graph_search_->plan(start_int(0), start_int(1), goal_int(0),
                                 goal_int(1), search_region_);
@@ -691,9 +705,8 @@ bool IterativeDMPlanner<Dim>::iterativeComputePath(
         printf("cweight: %f\n", this->cweight_);
         printf("pow: %d\n", this->pow_);
         printf("max_iteration: %d\n", max_iteration);
-        std::cout << "search_radius: " << this->search_radius_.transpose()
-                  << std::endl;
-        std::cout << "potential_radius: " << this->potential_radius_.transpose()
+        std::cout << "search_radius: " << this->search_radius_ << std::endl;
+        std::cout << "potential_radius: " << this->potential_radius_
                   << std::endl;
         std::cout << "potential_map_range: "
                   << this->potential_map_range_.transpose() << std::endl;

@@ -314,9 +314,6 @@ private:
     /// Initialize 2D jps arrays
     void init2DJps();
 
-    static constexpr double SQRT2 = 1.41421356237309504;
-    static constexpr double SQRT3 = 1.73205080756887729;
-
     std::shared_ptr<MapUtil<Dim>> map_util_;
     std::shared_ptr<const Tmap> cMap_;
     int xDim_, yDim_, zDim_;

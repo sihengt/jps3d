@@ -3,101 +3,150 @@
 
 using namespace DMP;
 
-GraphSearch::GraphSearch(const int8_t *cMap, int xDim, int yDim, double eps,
-                         double cweight, bool verbose)
-    : cMap_(cMap), xDim_(xDim), yDim_(yDim), eps_(eps), cweight_(cweight),
-      verbose_(verbose)
+// Single template constructor handling both 2D and 3D structurally
+template <int Dim>
+GraphSearch<Dim>::GraphSearch(
+    const std::shared_ptr<JPS::MapUtil<Dim>> &map_util, double eps,
+    double cweight, bool verbose, JPS::TmapValue thresh_dist,
+    JPS::TmapValue h_max, JPS::TmapValue potential_radius, int pow)
+    : map_util_(map_util),
+      // aliasing ctor: cMap_ shares map_util_'s refcount but points at its raw
+      // map_ data. The map is used directly as the cost map and is never
+      // modified.
+      cMap_(map_util_, &map_util_->map_), thresh_dist_(thresh_dist), eps_(eps),
+      cweight_(cweight), H_MAX(h_max), potential_radius_(potential_radius),
+      pow_(pow), verbose_(verbose)
 {
-    hm_.resize(xDim_ * yDim_);
-    seen_.resize(xDim_ * yDim_, false);
+    xDim_ = map_util_->getDim()(0);
+    yDim_ = map_util_->getDim()(1);
+    zDim_ = (Dim == 3) ? map_util_->getDim()(2) : 1;
 
-    for (int x = -1; x <= 1; x++)
+    int total_cells = xDim_ * yDim_ * zDim_;
+    hm_.resize(total_cells, nullptr);
+    visited_.resize(total_cells, 0);
+
+    // Dynamic generation of neighbors based on dimension, with the
+    // Euclidean grid-step distance precomputed once (only 1, sqrt(2), or
+    // sqrt(3) ever occur), instead of recomputing sqrt() per successor
+    // in the hot getSucc() loop.
+    if (Dim == 2)
     {
-        for (int y = -1; y <= 1; y++)
+        for (int x = -1; x <= 1; x++)
         {
-            if (x == 0 && y == 0)
-                continue;
-            ns_.push_back(std::vector<int>{x, y});
+            for (int y = -1; y <= 1; y++)
+            {
+                if (x == 0 && y == 0)
+                    continue;
+                ns_.push_back({x, y, 0, std::sqrt(double(x * x + y * y))});
+            }
         }
     }
-}
-
-GraphSearch::GraphSearch(const int8_t *cMap, int xDim, int yDim, int zDim,
-                         double eps, double cweight, bool verbose)
-    : cMap_(cMap), xDim_(xDim), yDim_(yDim), zDim_(zDim), eps_(eps),
-      cweight_(cweight), verbose_(verbose)
-{
-    hm_.resize(xDim_ * yDim_ * zDim_);
-    seen_.resize(xDim_ * yDim_ * zDim_, false);
-
-    // Set 3D neighbors
-    for (int x = -1; x <= 1; x++)
+    else if (Dim == 3)
     {
-        for (int y = -1; y <= 1; y++)
+        for (int x = -1; x <= 1; x++)
         {
-            for (int z = -1; z <= 1; z++)
+            for (int y = -1; y <= 1; y++)
             {
-                if (x == 0 && y == 0 && z == 0)
-                    continue;
-                ns_.push_back(std::vector<int>{x, y, z});
+                for (int z = -1; z <= 1; z++)
+                {
+                    if (x == 0 && y == 0 && z == 0)
+                        continue;
+                    ns_.push_back(
+                        {x, y, z, std::sqrt(double(x * x + y * y + z * z))});
+                }
             }
         }
     }
 }
 
-inline int GraphSearch::coordToId(int x, int y) const { return x + y * xDim_; }
-
-inline int GraphSearch::coordToId(int x, int y, int z) const
+template <int Dim> inline int GraphSearch<Dim>::coordToId(int x, int y) const
 {
-    return x + y * xDim_ + z * xDim_ * yDim_;
+    if constexpr (Dim == 2)
+    {
+        return map_util_->getIndex(Vec2i(x, y));
+    }
+    else
+    {
+        // Not implemented
+        return -1;
+    }
 }
 
-inline bool GraphSearch::isFree(int x, int y) const
+template <int Dim>
+inline int GraphSearch<Dim>::coordToId(int x, int y, int z) const
 {
-    return x >= 0 && x < xDim_ && y >= 0 && y < yDim_ &&
-           cMap_[coordToId(x, y)] < val_occ_;
+    if constexpr (Dim == 3)
+    {
+        return map_util_->getIndex(Vec3i(x, y, z));
+    }
+    else
+    {
+        // Not implemented
+        return -1;
+    }
 }
 
-inline bool GraphSearch::isFree(int x, int y, int z) const
+template <int Dim> inline bool GraphSearch<Dim>::isFree(int x, int y) const
 {
-    return x >= 0 && x < xDim_ && y >= 0 && y < yDim_ && z >= 0 && z < zDim_ &&
-           cMap_[coordToId(x, y, z)] < val_occ_;
+    if constexpr (Dim == 2)
+    {
+        return map_util_->isFree(Vec2i(x, y), thresh_dist_);
+    }
+    else
+    {
+        // Not implemented
+        return false;
+    }
 }
 
-inline double GraphSearch::getHeur(int x, int y) const
+template <int Dim>
+inline bool GraphSearch<Dim>::isFree(int x, int y, int z) const
+{
+    if constexpr (Dim == 3)
+    {
+        return map_util_->isFree(Vec3i(x, y, z), thresh_dist_);
+    }
+    else
+    {
+        // Not implemented
+        return false;
+    }
+}
+
+template <int Dim> inline double GraphSearch<Dim>::getHeur(int x, int y) const
 {
     return eps_ *
            std::sqrt((x - xGoal_) * (x - xGoal_) + (y - yGoal_) * (y - yGoal_));
 }
 
-inline double GraphSearch::getHeur(int x, int y, int z) const
+template <int Dim>
+inline double GraphSearch<Dim>::getHeur(int x, int y, int z) const
 {
     return eps_ *
            std::sqrt((x - xGoal_) * (x - xGoal_) + (y - yGoal_) * (y - yGoal_) +
                      (z - zGoal_) * (z - zGoal_));
 }
 
-double GraphSearch::plan(int xStart, int yStart, int xGoal, int yGoal,
-                         std::vector<bool> in_region)
+template <int Dim>
+double GraphSearch<Dim>::plan(int xStart, int yStart, int xGoal, int yGoal,
+                              std::vector<bool> in_region)
 {
     use_2d_ = true;
     pq_.clear();
     path_.clear();
-    hm_.resize(xDim_ * yDim_);
-    seen_.resize(xDim_ * yDim_, false);
+    hm_.assign(xDim_ * yDim_, nullptr);
+
+    current_planning_token_++;
+    if (current_planning_token_ == 0)
+    {
+        visited_.assign(xDim_ * yDim_, 0);
+        current_planning_token_ = 1;
+    }
     in_region_ = in_region;
-    if (in_region.empty())
-    {
-        global_ = true;
-        if (verbose_)
-            printf("global planning!\n");
-    }
-    else
-    {
-        global_ = false;
-        if (verbose_)
-            printf("local planning!\n");
-    }
+
+    global_ = in_region.empty();
+    if (verbose_)
+        printf(global_ ? "global planning!\n" : "local planning!\n");
 
     // Set goal
     int goal_id = coordToId(xGoal, yGoal);
@@ -106,37 +155,34 @@ double GraphSearch::plan(int xStart, int yStart, int xGoal, int yGoal,
 
     // Set start node
     int start_id = coordToId(xStart, yStart);
-    StatePtr currNode_ptr =
-        std::make_shared<State>(State(start_id, xStart, yStart));
-    currNode_ptr->g = cMap_[start_id];
+    StatePtr currNode_ptr = std::make_shared<State>(start_id, xStart, yStart);
+    currNode_ptr->g = (*cMap_)[start_id];
     currNode_ptr->h = getHeur(xStart, yStart);
 
     return plan(currNode_ptr, start_id, goal_id);
 }
 
-double GraphSearch::plan(int xStart, int yStart, int zStart, int xGoal,
-                         int yGoal, int zGoal, std::vector<bool> in_region)
+template <int Dim>
+double GraphSearch<Dim>::plan(int xStart, int yStart, int zStart, int xGoal,
+                              int yGoal, int zGoal, std::vector<bool> in_region)
 {
     use_2d_ = false;
     pq_.clear();
     path_.clear();
-    hm_.resize(xDim_ * yDim_ * zDim_);
-    seen_.resize(xDim_ * yDim_ * zDim_, false);
-    in_region_ = in_region;
-    if (in_region.empty())
-    {
-        global_ = true;
-        if (verbose_)
-            printf("global planning!\n");
-    }
-    else
-    {
-        global_ = false;
-        if (verbose_)
-            printf("local planning!\n");
-    }
+    hm_.assign(xDim_ * yDim_ * zDim_, nullptr);
 
-    // Set goal
+    current_planning_token_++;
+    if (current_planning_token_ == 0)
+    {
+        visited_.assign(xDim_ * yDim_ * zDim_, 0);
+        current_planning_token_ = 1;
+    }
+    in_region_ = in_region;
+
+    global_ = in_region.empty();
+    if (verbose_)
+        printf(global_ ? "global planning!\n" : "local planning!\n");
+
     int goal_id = coordToId(xGoal, yGoal, zGoal);
     xGoal_ = xGoal;
     yGoal_ = yGoal;
@@ -145,22 +191,27 @@ double GraphSearch::plan(int xStart, int yStart, int zStart, int xGoal,
     // Set start node
     int start_id = coordToId(xStart, yStart, zStart);
     StatePtr currNode_ptr =
-        std::make_shared<State>(State(start_id, xStart, yStart, zStart));
-    currNode_ptr->g = cMap_[start_id];
+        std::make_shared<State>(start_id, xStart, yStart, zStart);
+    currNode_ptr->g = (*cMap_)[start_id];
     currNode_ptr->h = getHeur(xStart, yStart, zStart);
 
     return plan(currNode_ptr, start_id, goal_id);
 }
 
-double GraphSearch::plan(StatePtr &currNode_ptr, int start_id, int goal_id)
+template <int Dim>
+double GraphSearch<Dim>::plan(StatePtr &currNode_ptr, int start_id, int goal_id)
 {
     // Insert start node
     currNode_ptr->heapkey = pq_.push(currNode_ptr);
     currNode_ptr->opened = true;
     hm_[currNode_ptr->id] = currNode_ptr;
-    seen_[currNode_ptr->id] = true;
+    visited_[currNode_ptr->id] = current_planning_token_;
 
     int expand_iteration = 0;
+
+    std::vector<int> succ_ids;
+    std::vector<double> succ_costs;
+
     while (true)
     {
         expand_iteration++;
@@ -176,9 +227,8 @@ double GraphSearch::plan(StatePtr &currNode_ptr, int start_id, int goal_id)
             break;
         }
 
-        // printf("expand: %d, %d\n", currNode_ptr->x, currNode_ptr->y);
-        std::vector<int> succ_ids;
-        std::vector<double> succ_costs;
+        succ_ids.clear();
+        succ_costs.clear();
         // Get successors
         getSucc(currNode_ptr, succ_ids, succ_costs);
 
@@ -188,8 +238,8 @@ double GraphSearch::plan(StatePtr &currNode_ptr, int start_id, int goal_id)
             // see if we can improve the value of succstate
             StatePtr &child_ptr = hm_[succ_ids[s]];
             double tentative_gval = currNode_ptr->g + succ_costs[s];
-
-            if (tentative_gval < child_ptr->g)
+            // Add a small epsilon for robust comparison
+            if (tentative_gval < child_ptr->g - 1e-9)
             {
                 child_ptr->parentId = currNode_ptr->id; // Assign new parent
                 child_ptr->g = tentative_gval;          // Update gval
@@ -202,7 +252,10 @@ double GraphSearch::plan(StatePtr &currNode_ptr, int start_id, int goal_id)
                 // if currently in CLOSED
                 else if (child_ptr->opened && child_ptr->closed)
                 {
-                    printf("ASTAR ERROR!\n");
+                    if (verbose_)
+                        printf(
+                            "ASTAR ERROR: re-opened a CLOSED node (id=%d)!\n",
+                            child_ptr->id);
                 }
                 else // new node, add to heap
                 {
@@ -233,7 +286,8 @@ double GraphSearch::plan(StatePtr &currNode_ptr, int start_id, int goal_id)
     return currNode_ptr->g;
 }
 
-std::vector<StatePtr> GraphSearch::recoverPath(StatePtr node, int start_id)
+template <int Dim>
+std::vector<StatePtr> GraphSearch<Dim>::recoverPath(StatePtr node, int start_id)
 {
     std::vector<StatePtr> path;
     path.push_back(node);
@@ -247,15 +301,20 @@ std::vector<StatePtr> GraphSearch::recoverPath(StatePtr node, int start_id)
     return path;
 }
 
-void GraphSearch::getSucc(const StatePtr &curr, std::vector<int> &succ_ids,
-                          std::vector<double> &succ_costs)
+template <int Dim>
+void GraphSearch<Dim>::getSucc(const StatePtr &curr, std::vector<int> &succ_ids,
+                               std::vector<double> &succ_costs)
 {
+
+    succ_ids.reserve(ns_.size());
+    succ_costs.reserve(ns_.size());
+
     if (use_2d_)
     {
         for (const auto &d : ns_)
         {
-            int new_x = curr->x + d[0];
-            int new_y = curr->y + d[1];
+            int new_x = curr->x + d.dx;
+            int new_y = curr->y + d.dy;
             if (!isFree(new_x, new_y))
                 continue;
 
@@ -263,25 +322,33 @@ void GraphSearch::getSucc(const StatePtr &curr, std::vector<int> &succ_ids,
             if (!global_ && !in_region_[new_id])
                 continue;
 
-            if (!seen_[new_id])
+            if (visited_[new_id] != current_planning_token_)
             {
-                seen_[new_id] = true;
+                visited_[new_id] = current_planning_token_;
                 hm_[new_id] = std::make_shared<State>(new_id, new_x, new_y);
                 hm_[new_id]->h = getHeur(new_x, new_y);
             }
-
+            // TODO: Defer weights calculation to here if using a ESDF map
+            // h = H_MAX × (1 - distance/radius)^pow, distance: ESDF value
+            float potential =
+                H_MAX * std::pow(1 - std::max(std::min((*cMap_)[new_id],
+                                                       potential_radius_),
+                                              0.0) /
+                                         potential_radius_,
+                                 pow_);
             succ_ids.push_back(new_id);
-            succ_costs.push_back(std::sqrt(d[0] * d[0] + d[1] * d[1]) +
-                                 cweight_ * (cMap_[new_id]));
+            succ_costs.push_back(d.dist + cweight_ * potential);
+            // succ_costs.push_back(std::sqrt(d[0] * d[0] + d[1] * d[1]) +
+            //                      cweight_ * (cMap_[new_id]));
         }
     }
     else
     {
         for (const auto &d : ns_)
         {
-            int new_x = curr->x + d[0];
-            int new_y = curr->y + d[1];
-            int new_z = curr->z + d[2];
+            int new_x = curr->x + d.dx;
+            int new_y = curr->y + d.dy;
+            int new_z = curr->z + d.dz;
             if (!isFree(new_x, new_y, new_z))
                 continue;
 
@@ -289,25 +356,36 @@ void GraphSearch::getSucc(const StatePtr &curr, std::vector<int> &succ_ids,
             if (!global_ && !in_region_[new_id])
                 continue;
 
-            if (!seen_[new_id])
+            if (visited_[new_id] != current_planning_token_)
             {
-                seen_[new_id] = true;
+                visited_[new_id] = current_planning_token_;
                 hm_[new_id] =
                     std::make_shared<State>(new_id, new_x, new_y, new_z);
                 hm_[new_id]->h = getHeur(new_x, new_y, new_z);
             }
-
+            // TODO: Defer weights calculation to here for ESDF map
+            // h = H_MAX × (1 - distance/radius)^pow, distance: ESDF value
+            float potential =
+                H_MAX * std::pow(1 - std::max(std::min((*cMap_)[new_id],
+                                                       potential_radius_),
+                                              0.0) /
+                                         potential_radius_,
+                                 pow_);
             succ_ids.push_back(new_id);
-            succ_costs.push_back(
-                std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) +
-                cweight_ * cMap_[new_id]);
+            succ_costs.push_back(d.dist + cweight_ * potential);
+            // succ_costs.push_back(
+            //     std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) +
+            //     cweight_ * cMap_[new_id]);
         }
     }
 }
 
-std::vector<StatePtr> GraphSearch::getPath() const { return path_; }
+template <int Dim> std::vector<StatePtr> GraphSearch<Dim>::getPath() const
+{
+    return path_;
+}
 
-std::vector<StatePtr> GraphSearch::getOpenSet() const
+template <int Dim> std::vector<StatePtr> GraphSearch<Dim>::getOpenSet() const
 {
     std::vector<StatePtr> ss;
     for (const auto &it : hm_)
@@ -318,7 +396,7 @@ std::vector<StatePtr> GraphSearch::getOpenSet() const
     return ss;
 }
 
-std::vector<StatePtr> GraphSearch::getCloseSet() const
+template <int Dim> std::vector<StatePtr> GraphSearch<Dim>::getCloseSet() const
 {
     std::vector<StatePtr> ss;
     for (const auto &it : hm_)
@@ -329,7 +407,7 @@ std::vector<StatePtr> GraphSearch::getCloseSet() const
     return ss;
 }
 
-std::vector<StatePtr> GraphSearch::getAllSet() const
+template <int Dim> std::vector<StatePtr> GraphSearch<Dim>::getAllSet() const
 {
     std::vector<StatePtr> ss;
     for (const auto &it : hm_)
@@ -339,3 +417,6 @@ std::vector<StatePtr> GraphSearch::getAllSet() const
     }
     return ss;
 }
+
+template class DMP::GraphSearch<2>;
+template class DMP::GraphSearch<3>;
