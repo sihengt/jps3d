@@ -49,7 +49,7 @@ private:
     static constexpr int8_t val_occ_     = 100;
     static constexpr int8_t val_unknown_ = -1;
     bool   block_unknown_      = true;
-    double frontier_seed_radius_ = 0.6;
+    double frontier_seed_radius_ = 0.6; // frontier_seed_radius_ allows a certain radius around the drone to be free.
     int inflate_cell_size_;
 
     /**
@@ -62,6 +62,19 @@ private:
     void init_map();
     void voxel_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
     void octomap_callback(const octomap_msgs::msg::Octomap::SharedPtr msg);
+    
+    /**
+     * @brief Service call to JPS3D to plan a route to the required goal.
+     * 
+     * JPS3D first plans on the optimistic map (unknown as free).
+     * if block_unknown_, will step through the planned path by steps. Steps are defined as 
+     * 0.001 or 1/2 the resolution of the map, whichever is bigger.
+     * 
+     * Publishes plan.
+     * 
+     * @param request 
+     * @param response 
+     */
     void plan_callback(
         const std::shared_ptr<nav_msgs::srv::GetPlan::Request>  request,
         std::shared_ptr<nav_msgs::srv::GetPlan::Response>       response);

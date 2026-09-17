@@ -14,22 +14,6 @@ void JPSPlanner<Dim>::setMapUtil(
     const std::shared_ptr<JPS::MapUtil<Dim>> &map_util)
 {
     map_util_ = map_util;
-    // aliasing ctor: cmap_ shares map_util_'s refcount but points at its map_
-    // data
-    cmap_ = std::shared_ptr<const JPS::Tmap>(map_util_, &map_util_->map_);
-
-    const Veci<Dim> dim = map_util_->getDim();
-    if (Dim == 3)
-    {
-        graph_search_ = std::make_shared<JPS::GraphSearch<Dim>>(
-            map_util_, dim(0), dim(1), dim(2), 1.0, planner_verbose_);
-    }
-    else
-    {
-        graph_search_ = std::make_shared<JPS::GraphSearch<Dim>>(
-            map_util_, dim(0), dim(1), 1.0, planner_verbose_);
-    }
-    graph_search_->setThreshDist(thresh_dist_);
 }
 
 template <int Dim> int JPSPlanner<Dim>::status() { return status_; }
@@ -192,81 +176,8 @@ bool JPSPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
     raw_path_.clear();
     status_ = 0;
 
-    // Refresh the virtual ceiling/floor z indices from the current map. The map
-    // may have slid since setMapUtil()/the last plan(), so these bounds cannot
-    // be cached in the ctor — recompute them here before any isOutside() check.
-    // TODO: the virtual ceiling/floor might be removed
-    map_util_->updateVirtualCeilingFloor();
-
-    // If start/goal fall outside the local map, project them onto the map
-    // edge along the line toward a seed point, then snap to nearest free cell
-    Vecf<Dim> local_start = start;
-    Vecf<Dim> local_goal = goal;
-    const bool start_out_of_map =
-        map_util_->isOutside(map_util_->floatToInt(start));
-
-    if (start_out_of_map)
-    {
-        if (planner_verbose_)
-            printf(ANSI_COLOR_RED "Start point is out of map, find a waypoint "
-                                  "to the map edge.\n" ANSI_COLOR_RESET);
-        Vecf<Dim> map_min, map_max;
-        map_util_->getLocalMapBound(map_min, map_max);
-        Vecf<Dim> map_center = (map_min + map_max) / 2;
-        Vecf<Dim> hit;
-        if (map_util_->lineIntersectMapBound(start, map_center, hit))
-        {
-            Vecf<Dim> dir = (hit - start).normalized();
-            decimal_t dis = (hit - start).norm();
-            Vecf<Dim> shifted = start + dir * (dis + map_util_->getRes() * 2);
-            if (!map_util_->getNearestKnownFreePos(shifted, local_start))
-            {
-                if (planner_verbose_)
-                {
-                    printf(ANSI_COLOR_RED
-                           "Start point deeply occupied, cannot find feasible "
-                           "path.\n" ANSI_COLOR_RESET);
-                }
-                status_ = 1;
-                return false;
-            }
-        }
-    }
-
-    const bool goal_out_of_map =
-        map_util_->isOutside(map_util_->floatToInt(goal));
-    if (goal_out_of_map)
-    {
-        Vecf<Dim> map_min, map_max;
-        map_util_->getLocalMapBound(map_min, map_max);
-        Vecf<Dim> seed_pt = start_out_of_map ? (map_min + map_max) / 2 : start;
-        Vecf<Dim> hit;
-        if (map_util_->lineIntersectMapBound(goal, seed_pt, hit))
-        {
-            Vecf<Dim> dir = (hit - goal).normalized();
-            decimal_t dis = (hit - goal).norm();
-            Vecf<Dim> shifted = goal + dir * (dis + 2.5 * map_util_->getRes());
-            if (!map_util_->getNearestKnownFreePos(shifted, local_goal))
-            {
-                if (planner_verbose_)
-                {
-                    printf(ANSI_COLOR_RED
-                           "Goal point deeply occupied, cannot find feasible "
-                           "path.\n" ANSI_COLOR_RESET);
-                }
-                status_ = 2;
-                return false;
-            }
-        }
-        if (planner_verbose_)
-        {
-            std::cout << "Shifted goal point is " << local_goal.transpose()
-                      << std::endl;
-        }
-    }
-
-    const Veci<Dim> start_int = map_util_->floatToInt(local_start);
-    if (!map_util_->isFree(start_int, thresh_dist_))
+    const Veci<Dim> start_int = map_util_->floatToInt(start);
+    if (!map_util_->isFree(start_int))
     {
         if (planner_verbose_)
         {
@@ -288,8 +199,8 @@ bool JPSPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
         return false;
     }
 
-    const Veci<Dim> goal_int = map_util_->floatToInt(local_goal);
-    if (!map_util_->isFree(goal_int, thresh_dist_))
+    const Veci<Dim> goal_int = map_util_->floatToInt(goal);
+    if (!map_util_->isFree(goal_int))
     {
         if (planner_verbose_)
             printf(ANSI_COLOR_RED "goal is not free!\n" ANSI_COLOR_RESET);
@@ -305,7 +216,32 @@ bool JPSPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
     graph_search_->setEps(eps);
     graph_search_->setThreshDist(thresh_dist_);
     if (Dim == 3)
+        dims_changed = dims_changed || dim(0) != graph_search_dim_x_ ||
+                       dim(1) != graph_search_dim_y_ ||
+                       dim(2) != graph_search_dim_z_;
+    else
+        dims_changed = dims_changed || dim(0) != graph_search_dim_x_ ||
+                       dim(1) != graph_search_dim_y_;
+
+    if (dims_changed)
     {
+        if (Dim == 3)
+            graph_search_ = std::make_shared<JPS::GraphSearch>(
+                cmap_.data(), dim(0), dim(1), dim(2), eps, planner_verbose_);
+        else
+            graph_search_ = std::make_shared<JPS::GraphSearch>(
+                cmap_.data(), dim(0), dim(1), eps, planner_verbose_);
+        graph_search_dim_x_ = dim(0);
+        graph_search_dim_y_ = dim(1);
+        if (Dim == 3)
+            graph_search_dim_z_ = dim(2);
+    }
+    else
+    {
+        graph_search_->setEps(eps);
+    }
+
+    if (Dim == 3)
         graph_search_->plan(start_int(0), start_int(1), start_int(2),
                             goal_int(0), goal_int(1), goal_int(2), use_jps);
     }

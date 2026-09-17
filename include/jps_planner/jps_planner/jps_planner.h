@@ -22,8 +22,11 @@ public:
      */
     JPSPlanner(bool verbose = false);
 
-    /// Set map util for collistion checking
-    void setMapUtil(const std::shared_ptr<JPS::MapUtil<Dim>> &map_util);
+    /**
+     * @brief map_util_ setter
+     */
+    inline void setMapUtil(const std::shared_ptr<JPS::MapUtil<Dim>> &map_util) {map_util_ = map_util; }
+    
     /**
      * @brief Status of the planner
      *
@@ -62,7 +65,7 @@ protected:
     std::shared_ptr<JPS::MapUtil<Dim>> map_util_;
     /// The planner -- persists across plan() calls; only rebuilt if the map
     /// dimensions change. See plan() in jps_planner.cpp.
-    std::shared_ptr<JPS::GraphSearch> graph_search_;
+    std::shared_ptr<JPS::GraphSearch<Dim>> graph_search_;
     /// Dimensions graph_search_ was last built for (-1 = not built yet)
     int graph_search_dim_x_ = -1;
     int graph_search_dim_y_ = -1;
@@ -75,9 +78,8 @@ protected:
     int status_ = 0;
     /// Enabled for printing info
     bool planner_verbose_;
-    /// Shared pointer aliasing map_util_'s map data, avoids copying while
-    /// keeping map_util_ alive
-    std::shared_ptr<const JPS::Tmap> cmap_;
+    /// 1-D map array
+    JPS::Tmap cmap_;
     /// TODO: to refactor
     /// Distance >= thresh_dist_ are considered free
     JPS::TmapValue thresh_dist_ = 0;

@@ -332,10 +332,6 @@ private:
 
     std::vector<StatePtr> path_;
 
-    // Precomputed constants — avoids recomputing sqrt(2) and sqrt(3) each call
-    static constexpr double SQRT2 = 1.41421356237309504;
-    static constexpr double SQRT3 = 1.73205080756887729;
-
     std::vector<std::vector<int>> ns_;
     std::shared_ptr<JPS2DNeib> jn2d_;
     std::shared_ptr<JPS3DNeib> jn3d_;
