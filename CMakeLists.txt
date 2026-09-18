@@ -15,6 +15,7 @@ set(BUILD_SHARED_LIBS ON)
 
 find_package(Eigen3 REQUIRED)
 find_package(PkgConfig REQUIRED)
+find_package(octomap REQUIRED)
 
 PKG_CHECK_MODULES(YAMLCPP REQUIRED yaml-cpp)
 if(YAMLCPP_FOUND)
@@ -71,6 +72,11 @@ add_test(test_map_util_ceiling test_map_util_ceiling)
 add_executable(test_map_util_dilate test/test_map_util_dilate.cpp)
 target_link_libraries(test_map_util_dilate jps_lib)
 add_test(test_map_util_dilate test_map_util_dilate)
+
+add_executable(test_map_util_octo test/test_map_util_octo.cpp)
+target_include_directories(test_map_util_octo PRIVATE ${OCTOMAP_INCLUDE_DIRS})
+target_link_libraries(test_map_util_octo jps_lib ${OCTOMAP_LIBRARIES})
+add_test(test_map_util_octo test_map_util_octo)
 
 add_executable(test_planner_ceiling test/test_planner_ceiling.cpp)
 target_link_libraries(test_planner_ceiling jps_lib ${YAMLCPP_LIBRARIES})
