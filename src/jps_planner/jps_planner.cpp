@@ -1,25 +1,40 @@
 #include "../../test/timer.hpp"
+#include <iostream>
 #include <jps_planner/jps_planner/jps_planner.h>
 
-template <int Dim>
-JPSPlanner<Dim>::JPSPlanner(bool verbose) : planner_verbose_(verbose)
+template <int Dim, typename ValueT>
+JPSPlanner<Dim, ValueT>::JPSPlanner(bool verbose) : planner_verbose_(verbose)
 {
     planner_verbose_ = verbose;
     if (planner_verbose_)
         printf(ANSI_COLOR_CYAN "JPS PLANNER VERBOSE ON\n" ANSI_COLOR_RESET);
 }
 
-template <int Dim> int JPSPlanner<Dim>::status() { return status_; }
+template <int Dim, typename ValueT> int JPSPlanner<Dim, ValueT>::status()
+{
+    return status_;
+}
 
-template <int Dim> vec_Vecf<Dim> JPSPlanner<Dim>::getPath() { return path_; }
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getPath()
+{
+    return path_;
+}
 
-template <int Dim> vec_Vecf<Dim> JPSPlanner<Dim>::getRawPath()
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getRawPath()
 {
     return raw_path_;
 }
 
-template <int Dim>
-vec_Vecf<Dim> JPSPlanner<Dim>::removeCornerPts(const vec_Vecf<Dim> &path)
+template <int Dim, typename ValueT> void JPSPlanner<Dim, ValueT>::updateMap()
+{
+    cmap_ = map_util_->getMap();
+}
+
+template <int Dim, typename ValueT>
+vec_Vecf<Dim>
+JPSPlanner<Dim, ValueT>::removeCornerPts(const vec_Vecf<Dim> &path)
 {
     if (path.size() < 2)
         return path;
@@ -65,8 +80,8 @@ vec_Vecf<Dim> JPSPlanner<Dim>::removeCornerPts(const vec_Vecf<Dim> &path)
     return optimized_path;
 }
 
-template <int Dim>
-vec_Vecf<Dim> JPSPlanner<Dim>::removeLinePts(const vec_Vecf<Dim> &path)
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::removeLinePts(const vec_Vecf<Dim> &path)
 {
     if (path.size() < 3)
         return path;
@@ -91,7 +106,8 @@ vec_Vecf<Dim> JPSPlanner<Dim>::removeLinePts(const vec_Vecf<Dim> &path)
     return new_path;
 }
 
-template <int Dim> vec_Vecf<Dim> JPSPlanner<Dim>::getOpenSet() const
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getOpenSet() const
 {
     vec_Vecf<Dim> ps;
     const auto ss = graph_search_->getOpenSet();
@@ -109,7 +125,8 @@ template <int Dim> vec_Vecf<Dim> JPSPlanner<Dim>::getOpenSet() const
     return ps;
 }
 
-template <int Dim> vec_Vecf<Dim> JPSPlanner<Dim>::getCloseSet() const
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getCloseSet() const
 {
     vec_Vecf<Dim> ps;
     const auto ss = graph_search_->getCloseSet();
@@ -127,7 +144,8 @@ template <int Dim> vec_Vecf<Dim> JPSPlanner<Dim>::getCloseSet() const
     return ps;
 }
 
-template <int Dim> vec_Vecf<Dim> JPSPlanner<Dim>::getAllSet() const
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getAllSet() const
 {
     vec_Vecf<Dim> ps;
     const auto ss = graph_search_->getAllSet();
@@ -145,9 +163,10 @@ template <int Dim> vec_Vecf<Dim> JPSPlanner<Dim>::getAllSet() const
     return ps;
 }
 
-template <int Dim>
-bool JPSPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
-                           decimal_t eps, bool use_jps)
+template <int Dim, typename ValueT>
+bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start,
+                                   const Vecf<Dim> &goal, decimal_t eps,
+                                   bool use_jps)
 {
     if (!map_util_)
     {
@@ -170,11 +189,11 @@ bool JPSPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
     status_ = 0;
 
     const Veci<Dim> start_int = map_util_->floatToInt(start);
-    if (!map_util_->isFree(start_int))
+    if (!map_util_->isFree(start_int, thresh_val_))
     {
         if (planner_verbose_)
         {
-            if (map_util_->isOccupied(start_int, thresh_dist_))
+            if (map_util_->isOccupied(start_int, thresh_val_))
                 printf(ANSI_COLOR_RED "start is occupied!\n" ANSI_COLOR_RESET);
             else if (map_util_->isUnknown(start_int))
                 printf(ANSI_COLOR_RED "start is unknown!\n" ANSI_COLOR_RESET);
@@ -193,7 +212,7 @@ bool JPSPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
     }
 
     const Veci<Dim> goal_int = map_util_->floatToInt(goal);
-    if (!map_util_->isFree(goal_int))
+    if (!map_util_->isFree(goal_int, thresh_val_))
     {
         if (planner_verbose_)
             printf(ANSI_COLOR_RED "goal is not free!\n" ANSI_COLOR_RESET);
@@ -201,49 +220,44 @@ bool JPSPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
         return false;
     }
 
-    // Reuse graph_search_ built once in setMapUtil().
-    // Resets per-search state (generation token, pq_, path_, pool indices) at
-    // the top of plan(), so no reallocation is needed here.
-    // eps and thresh_dist are applied per-plan.
+    // Reuse the persistent graph_search_ across plan() calls, only rebuilding
+    // it if the map dimensions changed since it was last built.
     JPS::Timer time_search(true);
-    graph_search_->setEps(eps);
-    graph_search_->setThreshDist(thresh_dist_);
 
-    // If dimensions have changed between planning cycles, recreate graph_search_
+    const Veci<Dim> dim = map_util_->getDim();
+    bool dims_changed;
     if (Dim == 3)
-        dims_changed = dims_changed || dim(0) != graph_search_dim_x_ ||
+        dims_changed = dim(0) != graph_search_dim_x_ ||
                        dim(1) != graph_search_dim_y_ ||
                        dim(2) != graph_search_dim_z_;
     else
-        dims_changed = dims_changed || dim(0) != graph_search_dim_x_ ||
-                       dim(1) != graph_search_dim_y_;
-    if (dims_changed)
+        dims_changed =
+            dim(0) != graph_search_dim_x_ || dim(1) != graph_search_dim_y_;
+
+    if (!graph_search_ || dims_changed)
     {
         if (Dim == 3)
-            graph_search_ = std::make_shared<JPS::GraphSearch>(
-                cmap_.data(), dim(0), dim(1), dim(2), eps, planner_verbose_);
+            graph_search_ = std::make_shared<JPS::GraphSearch<Dim, ValueT>>(
+                map_util_, dim(0), dim(1), dim(2), eps, planner_verbose_);
         else
-            graph_search_ = std::make_shared<JPS::GraphSearch>(
-                cmap_.data(), dim(0), dim(1), eps, planner_verbose_);
+            graph_search_ = std::make_shared<JPS::GraphSearch<Dim, ValueT>>(
+                map_util_, dim(0), dim(1), eps, planner_verbose_);
         graph_search_dim_x_ = dim(0);
         graph_search_dim_y_ = dim(1);
         if (Dim == 3)
             graph_search_dim_z_ = dim(2);
     }
-    else
-    {
-        graph_search_->setEps(eps);
-    }
+
+    graph_search_->setEps(eps);
+    graph_search_->setThreshVal(thresh_val_);
 
     if (Dim == 3)
         graph_search_->plan(start_int(0), start_int(1), start_int(2),
                             goal_int(0), goal_int(1), goal_int(2), use_jps);
-    }
     else
-    {
         graph_search_->plan(start_int(0), start_int(1), goal_int(0),
                             goal_int(1), use_jps);
-    }
+
     double dt_search = time_search.Elapsed().count();
     if (planner_verbose_)
     {
@@ -291,6 +305,6 @@ bool JPSPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
     return true;
 }
 
-template class JPSPlanner<2>;
+template class JPSPlanner<2, double>;
 
-template class JPSPlanner<3>;
+template class JPSPlanner<3, double>;

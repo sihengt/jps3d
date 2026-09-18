@@ -3,16 +3,20 @@
 
 using namespace JPS;
 
+namespace
+{
+constexpr double SQRT2 = 1.41421356237309504880;
+constexpr double SQRT3 = 1.73205080756887729353;
+} // namespace
+
 double JPS::g_heur_weight = 1.0;
 
-template <int Dim>
-GraphSearch<Dim>::GraphSearch(const std::shared_ptr<MapUtil<Dim>> &map_util,
-                              int xDim, int yDim, double eps, bool verbose)
-    : map_util_(map_util),
-      // aliasing ctor: cMap_ shares map_util_'s refcount but points at its map_
-      // data
-      cMap_(map_util_, &map_util_->map_), xDim_(xDim), yDim_(yDim), eps_(eps),
-      verbose_(verbose)
+template <int Dim, typename ValueT>
+GraphSearch<Dim, ValueT>::GraphSearch(
+    const std::shared_ptr<MapUtil<Dim, ValueT>> &map_util, int xDim, int yDim,
+    double eps, bool verbose)
+    : map_util_(map_util), cMap_(map_util_->getMap()), xDim_(xDim),
+      yDim_(yDim), eps_(eps), verbose_(verbose)
 {
     g_heur_weight = eps_;
     hm_.resize(xDim_ * yDim_, nullptr);
@@ -31,15 +35,12 @@ GraphSearch<Dim>::GraphSearch(const std::shared_ptr<MapUtil<Dim>> &map_util,
     jn2d_ = std::make_shared<JPS2DNeib>();
 }
 
-template <int Dim>
-GraphSearch<Dim>::GraphSearch(const std::shared_ptr<MapUtil<Dim>> &map_util,
-                              int xDim, int yDim, int zDim, double eps,
-                              bool verbose)
-    : map_util_(map_util),
-      // aliasing ctor: cMap_ shares map_util_'s refcount but points at its map_
-      // data
-      cMap_(map_util_, &map_util_->map_), xDim_(xDim), yDim_(yDim), zDim_(zDim),
-      eps_(eps), verbose_(verbose)
+template <int Dim, typename ValueT>
+GraphSearch<Dim, ValueT>::GraphSearch(
+    const std::shared_ptr<MapUtil<Dim, ValueT>> &map_util, int xDim, int yDim,
+    int zDim, double eps, bool verbose)
+    : map_util_(map_util), cMap_(map_util_->getMap()), xDim_(xDim),
+      yDim_(yDim), zDim_(zDim), eps_(eps), verbose_(verbose)
 {
     g_heur_weight = eps_;
     hm_.resize(xDim_ * yDim_ * zDim_, nullptr);
@@ -61,7 +62,8 @@ GraphSearch<Dim>::GraphSearch(const std::shared_ptr<MapUtil<Dim>> &map_util,
     jn3d_ = std::make_shared<JPS3DNeib>();
 }
 
-template <int Dim> inline int GraphSearch<Dim>::coordToId(int x, int y) const
+template <int Dim, typename ValueT>
+inline int GraphSearch<Dim, ValueT>::coordToId(int x, int y) const
 {
     if constexpr (Dim == 2)
     {
@@ -74,8 +76,8 @@ template <int Dim> inline int GraphSearch<Dim>::coordToId(int x, int y) const
     }
 }
 
-template <int Dim>
-inline int GraphSearch<Dim>::coordToId(int x, int y, int z) const
+template <int Dim, typename ValueT>
+inline int GraphSearch<Dim, ValueT>::coordToId(int x, int y, int z) const
 {
     if constexpr (Dim == 3)
     {
@@ -88,14 +90,15 @@ inline int GraphSearch<Dim>::coordToId(int x, int y, int z) const
     }
 }
 
-template <int Dim> inline bool GraphSearch<Dim>::isFree(int x, int y) const
+template <int Dim, typename ValueT>
+inline bool GraphSearch<Dim, ValueT>::isFree(int x, int y) const
 {
     if constexpr (Dim == 2)
     {
         // map_util_->isFree already returns false when outside, so the
         // separate isOutside() call (which recomputes the same index) is
         // redundant — let the coordinate query handle both at once.
-        return map_util_->isFree(Veci<Dim>(x, y), thresh_dist_);
+        return map_util_->isFree(Veci<Dim>(x, y), thresh_val_);
     }
     else
     {
@@ -104,12 +107,12 @@ template <int Dim> inline bool GraphSearch<Dim>::isFree(int x, int y) const
     }
 }
 
-template <int Dim>
-inline bool GraphSearch<Dim>::isFree(int x, int y, int z) const
+template <int Dim, typename ValueT>
+inline bool GraphSearch<Dim, ValueT>::isFree(int x, int y, int z) const
 {
     if constexpr (Dim == 3)
     {
-        return map_util_->isFree(Veci<Dim>(x, y, z), thresh_dist_);
+        return map_util_->isFree(Veci<Dim>(x, y, z), thresh_val_);
     }
     else
     {
@@ -118,13 +121,14 @@ inline bool GraphSearch<Dim>::isFree(int x, int y, int z) const
     }
 }
 
-template <int Dim> inline bool GraphSearch<Dim>::isOccupied(int x, int y) const
+template <int Dim, typename ValueT>
+inline bool GraphSearch<Dim, ValueT>::isOccupied(int x, int y) const
 {
     if constexpr (Dim == 2)
     {
         // isOccupied already treats outside cells as occupied, so the
         // redundant outer isOutside() index recomputation is dropped.
-        return map_util_->isOccupied(Veci<Dim>(x, y), thresh_dist_);
+        return map_util_->isOccupied(Veci<Dim>(x, y), thresh_val_);
     }
     else
     {
@@ -133,12 +137,12 @@ template <int Dim> inline bool GraphSearch<Dim>::isOccupied(int x, int y) const
     }
 }
 
-template <int Dim>
-inline bool GraphSearch<Dim>::isOccupied(int x, int y, int z) const
+template <int Dim, typename ValueT>
+inline bool GraphSearch<Dim, ValueT>::isOccupied(int x, int y, int z) const
 {
     if constexpr (Dim == 3)
     {
-        return map_util_->isOccupied(Veci<Dim>(x, y, z), thresh_dist_);
+        return map_util_->isOccupied(Veci<Dim>(x, y, z), thresh_val_);
     }
     else
     {
@@ -150,10 +154,11 @@ inline bool GraphSearch<Dim>::isOccupied(int x, int y, int z) const
 /**
  * @brief 2D getHeur is octile distance. (todo: make this hot-swappable with other heuristics)
  * Octile distance is more represenative when diagonal movements are allowed, (is admissible, tighter than Euclidean).
- * 
+ *
  * @return double unweighted octile distance
  */
-template <int Dim> inline double GraphSearch<Dim>::getHeur(int x, int y) const
+template <int Dim, typename ValueT>
+inline double GraphSearch<Dim, ValueT>::getHeur(int x, int y) const
 {
     // Raw (unweighted) heuristic — eps_ weighting is applied in
     // compare_state::fval via the piecewise f-value formula, not here.
@@ -164,11 +169,11 @@ template <int Dim> inline double GraphSearch<Dim>::getHeur(int x, int y) const
 
 /**
  * @brief 3D getHeur is diagonal distance.
- * 
+ *
  * @return double unweighted diagonal distance
  */
-template <int Dim>
-inline double GraphSearch<Dim>::getHeur(int x, int y, int z) const
+template <int Dim, typename ValueT>
+inline double GraphSearch<Dim, ValueT>::getHeur(int x, int y, int z) const
 {
     // Raw (unweighted) heuristic — see 2D overload above.
     int dx = std::abs(x - xGoal_);
@@ -180,9 +185,9 @@ inline double GraphSearch<Dim>::getHeur(int x, int y, int z) const
     return SQRT3 * dmin + SQRT2 * (dmid - dmin) + 1.0 * (dmax - dmid);
 }
 
-template <int Dim>
-bool GraphSearch<Dim>::plan(int xStart, int yStart, int xGoal, int yGoal,
-                            bool useJps, int maxExpand)
+template <int Dim, typename ValueT>
+bool GraphSearch<Dim, ValueT>::plan(int xStart, int yStart, int xGoal,
+                                    int yGoal, bool useJps, int maxExpand)
 {
     use_2d_ = true;
     pq_.clear();
@@ -220,16 +225,17 @@ bool GraphSearch<Dim>::plan(int xStart, int yStart, int xGoal, int yGoal,
  * 1) planning_token_
  * 2) block_idx_
  * 3) slot_idx_
- * 
+ *
  * Creates a currNode_ptr corresponding to the starting node, sets up start/goal_ids, and
  * sends it off to overloaded plan() that runs core logic.
- * 
- * @return true 
- * @return false 
+ *
+ * @return true
+ * @return false
  */
-template <int Dim>
-bool GraphSearch<Dim>::plan(int xStart, int yStart, int zStart, int xGoal,
-                            int yGoal, int zGoal, bool useJps, int maxExpand)
+template <int Dim, typename ValueT>
+bool GraphSearch<Dim, ValueT>::plan(int xStart, int yStart, int zStart,
+                                    int xGoal, int yGoal, int zGoal,
+                                    bool useJps, int maxExpand)
 {
     use_2d_ = false;
     pq_.clear();
@@ -264,10 +270,9 @@ bool GraphSearch<Dim>::plan(int xStart, int yStart, int zStart, int xGoal,
     return plan(currNode_ptr, maxExpand, start_id, goal_id);
 }
 
-
-template <int Dim>
-bool GraphSearch<Dim>::plan(StatePtr &currNode_ptr, int maxExpand, int start_id,
-                            int goal_id)
+template <int Dim, typename ValueT>
+bool GraphSearch<Dim, ValueT>::plan(StatePtr &currNode_ptr, int maxExpand,
+                                    int start_id, int goal_id)
 {
     if (start_id < 0 || start_id >= static_cast<int>(hm_.size()))
     {
@@ -399,8 +404,9 @@ bool GraphSearch<Dim>::plan(StatePtr &currNode_ptr, int maxExpand, int start_id,
     return true;
 }
 
-template <int Dim>
-std::vector<StatePtr> GraphSearch<Dim>::recoverPath(StatePtr node, int start_id)
+template <int Dim, typename ValueT>
+std::vector<StatePtr> GraphSearch<Dim, ValueT>::recoverPath(StatePtr node,
+                                                            int start_id)
 {
     std::vector<StatePtr> path;
     path.push_back(node);
@@ -413,9 +419,10 @@ std::vector<StatePtr> GraphSearch<Dim>::recoverPath(StatePtr node, int start_id)
     return path;
 }
 
-template <int Dim>
-void GraphSearch<Dim>::getSucc(const StatePtr &curr, std::vector<int> &succ_ids,
-                               std::vector<double> &succ_costs)
+template <int Dim, typename ValueT>
+void GraphSearch<Dim, ValueT>::getSucc(const StatePtr &curr,
+                                       std::vector<int> &succ_ids,
+                                       std::vector<double> &succ_costs)
 {
     succ_ids.reserve(ns_.size());
     succ_costs.reserve(ns_.size());
@@ -471,10 +478,10 @@ void GraphSearch<Dim>::getSucc(const StatePtr &curr, std::vector<int> &succ_ids,
     }
 }
 
-template <int Dim>
-void GraphSearch<Dim>::getJpsSucc(const StatePtr &curr,
-                                  std::vector<int> &succ_ids,
-                                  std::vector<double> &succ_costs)
+template <int Dim, typename ValueT>
+void GraphSearch<Dim, ValueT>::getJpsSucc(const StatePtr &curr,
+                                          std::vector<int> &succ_ids,
+                                          std::vector<double> &succ_costs)
 {
 
     if (use_2d_)
@@ -637,12 +644,46 @@ void GraphSearch<Dim>::getJpsSucc(const StatePtr &curr,
     }
 }
 
-template <int Dim>
-bool GraphSearch<Dim>::jump(int x, int y, int dx, int dy, int &new_x,
-                            int &new_y)
+template <int Dim, typename ValueT>
+inline bool GraphSearch<Dim, ValueT>::cutsCorner(int x, int y, int dx, int dy)
+{
+    if (dx == 0 || dy == 0)
+        return false;
+    return isOccupied(x + dx, y) && isOccupied(x, y + dy);
+}
+
+template <int Dim, typename ValueT>
+inline bool GraphSearch<Dim, ValueT>::cutsCorner(int x, int y, int z, int dx,
+                                                 int dy, int dz)
+{
+    const int norm1 = std::abs(dx) + std::abs(dy) + std::abs(dz);
+    if (norm1 <= 1)
+        return false;
+
+    if (norm1 == 2)
+    {
+        // Two axes active; reuse the 2D rule on the active pair.
+        if (dx == 0)
+            return isOccupied(x, y + dy, z) && isOccupied(x, y, z + dz);
+        if (dy == 0)
+            return isOccupied(x + dx, y, z) && isOccupied(x, y, z + dz);
+        // dz == 0
+        return isOccupied(x + dx, y, z) && isOccupied(x, y + dy, z);
+    }
+
+    // norm1 == 3: body diagonal. Reverting one axis at a time gives the three
+    // face-adjacent bypass cells. The diagonal is only a true squeeze when all
+    // three are blocked (no surrounding free route).
+    return isOccupied(x, y + dy, z + dz) && isOccupied(x + dx, y, z + dz) &&
+           isOccupied(x + dx, y + dy, z);
+}
+
+template <int Dim, typename ValueT>
+bool GraphSearch<Dim, ValueT>::jump(int x, int y, int dx, int dy, int &new_x,
+                                    int &new_y)
 {
 
-    // Compute once - constant for entire corridor walk
+    // Compute once — constant for entire corridor walk
     const int id = (dx + 1) + 3 * (dy + 1);
     const int norm1 = std::abs(dx) + std::abs(dy);
     const int num_neib = jn2d_->nsz[norm1][0];
@@ -658,15 +699,23 @@ bool GraphSearch<Dim>::jump(int x, int y, int dx, int dy, int &new_x,
         if (!isFree(new_x, new_y))
             return false;
 
-        // check if goal is reached
+        // No corner cutting: a diagonal step may only be taken if it does
+        // not squeeze diagonally between two blocked cells.
+        if (cutsCorner(x, y, dx, dy))
+            return false;
+
+        // coordToId is not linear in (x,y) — recompute per step rather than
+        // incrementing by a precomputed stride
         if (coordToId(new_x, new_y) == goalId_)
             return true;
 
-        // passing precomputed id, norm1, as these stay the same regardless
+        // Pass precomputed id — avoids recomputation inside hasForced
         if (hasForcedWithId(new_x, new_y, id, norm1))
             return true;
 
-        // Sub-direction probes - only diagonal moves recurse here.
+        // Sub-direction probes — cardinal moves have num_neib==1 so this
+        // loop runs 0 times; only diagonal moves recurse here.
+        // Max recursion depth: 2 frames (diagonal → cardinal → no sub-calls)
         for (int k = 0; k < num_neib - 1; ++k)
         {
             int sub_new_x, sub_new_y;
@@ -674,7 +723,7 @@ bool GraphSearch<Dim>::jump(int x, int y, int dx, int dy, int &new_x,
                 return true;
         }
 
-        // Advance to next if no point of interest found
+        // Advance — was the tail-recursive call, now just a loop-back
         x = new_x;
         y = new_y;
     }
@@ -682,8 +731,8 @@ bool GraphSearch<Dim>::jump(int x, int y, int dx, int dy, int &new_x,
 
 /**
  * @brief Re
- * 
- * @tparam Dim 
+ *
+ * @tparam Dim
  * @param x current x
  * @param y current y
  * @param z current z
@@ -696,9 +745,9 @@ bool GraphSearch<Dim>::jump(int x, int y, int dx, int dy, int &new_x,
  * @return true jump point found
  * @return false nothing interesting found - dead end
  */
-template <int Dim>
-bool GraphSearch<Dim>::jump(int x, int y, int z, int dx, int dy, int dz,
-                            int &new_x, int &new_y, int &new_z)
+template <int Dim, typename ValueT>
+bool GraphSearch<Dim, ValueT>::jump(int x, int y, int z, int dx, int dy, int dz,
+                                    int &new_x, int &new_y, int &new_z)
 {
 
     // Precompute - constant for entire corridor walk
@@ -709,7 +758,10 @@ bool GraphSearch<Dim>::jump(int x, int y, int z, int dx, int dy, int dz,
     const int *sub_dy = jn3d_->ns[id][1];
     const int *sub_dz = jn3d_->ns[id][2];
 
-    // During corridor walk, looks for a jump point 
+    // Iterative corridor walk. Sub-direction probes still recurse below;
+    // recursion depth is bounded because sub-directions always have
+    // strictly lower norm1 (body-diag -> face-diag -> cardinal -> none),
+    // so max live stack depth is 3 frames regardless of grid size.
     while (true)
     {
         new_x = x + dx;
@@ -719,6 +771,13 @@ bool GraphSearch<Dim>::jump(int x, int y, int z, int dx, int dy, int dz,
         if (!isFree(new_x, new_y, new_z))
             return false;
 
+        // No corner cutting: a diagonal/body-diagonal step may only be taken
+        // if it does not squeeze through blocked bypass cells.
+        if (cutsCorner(x, y, z, dx, dy, dz))
+            return false;
+
+        // coordToId is not linear in (x,y,z) — recompute per step rather
+        // than incrementing by a precomputed stride
         if (coordToId(new_x, new_y, new_z) == goalId_)
             return true;
 
@@ -740,9 +799,10 @@ bool GraphSearch<Dim>::jump(int x, int y, int z, int dx, int dy, int dz,
     }
 }
 
-// 2D - id and norm1 passed in from jump()
-template <int Dim>
-inline bool GraphSearch<Dim>::hasForcedWithId(int x, int y, int id, int norm1)
+// 2D — id and norm1 passed in from jump(), zero recomputation
+template <int Dim, typename ValueT>
+inline bool GraphSearch<Dim, ValueT>::hasForcedWithId(int x, int y, int id,
+                                                      int norm1)
 {
     const int num_forced = jn2d_->nsz[norm1][1];
     const int *f1x = jn2d_->f1[id][0];
@@ -758,19 +818,19 @@ inline bool GraphSearch<Dim>::hasForcedWithId(int x, int y, int id, int norm1)
 
 /**
  * @brief hasForced which uses precomputed id to save computation
- * 
- * @tparam Dim 
- * @param x 
- * @param y 
- * @param z 
- * @param id 
- * @param norm1 
- * @return true 
- * @return false 
+ *
+ * @tparam Dim
+ * @param x
+ * @param y
+ * @param z
+ * @param id
+ * @param norm1
+ * @return true
+ * @return false
  */
-template <int Dim>
-inline bool GraphSearch<Dim>::hasForcedWithId(int x, int y, int z, int id,
-                                              int norm1)
+template <int Dim, typename ValueT>
+inline bool GraphSearch<Dim, ValueT>::hasForcedWithId(int x, int y, int z,
+                                                      int id, int norm1)
 {
     // Check number of potential forced neighbors
     const int num_forced = jn3d_->nsz[norm1][1];
@@ -787,8 +847,8 @@ inline bool GraphSearch<Dim>::hasForcedWithId(int x, int y, int z, int id,
     return false;
 }
 
-template <int Dim>
-inline bool GraphSearch<Dim>::hasForced(int x, int y, int dx, int dy)
+template <int Dim, typename ValueT>
+inline bool GraphSearch<Dim, ValueT>::hasForced(int x, int y, int dx, int dy)
 {
     const int id = (dx + 1) + 3 * (dy + 1);
     for (int fn = 0; fn < 2; ++fn)
@@ -801,9 +861,9 @@ inline bool GraphSearch<Dim>::hasForced(int x, int y, int dx, int dy)
     return false;
 }
 
-template <int Dim>
-inline bool GraphSearch<Dim>::hasForced(int x, int y, int z, int dx, int dy,
-                                        int dz)
+template <int Dim, typename ValueT>
+inline bool GraphSearch<Dim, ValueT>::hasForced(int x, int y, int z, int dx,
+                                                int dy, int dz)
 {
     int norm1 = std::abs(dx) + std::abs(dy) + std::abs(dz);
     int id = (dx + 1) + 3 * (dy + 1) + 9 * (dz + 1);
@@ -847,12 +907,14 @@ inline bool GraphSearch<Dim>::hasForced(int x, int y, int z, int dx, int dy,
     }
 }
 
-template <int Dim> std::vector<StatePtr> GraphSearch<Dim>::getPath() const
+template <int Dim, typename ValueT>
+std::vector<StatePtr> GraphSearch<Dim, ValueT>::getPath() const
 {
     return path_;
 }
 
-template <int Dim> std::vector<StatePtr> GraphSearch<Dim>::getOpenSet() const
+template <int Dim, typename ValueT>
+std::vector<StatePtr> GraphSearch<Dim, ValueT>::getOpenSet() const
 {
     std::vector<StatePtr> ss;
     for (size_t i = 0; i < hm_.size(); ++i)
@@ -864,7 +926,8 @@ template <int Dim> std::vector<StatePtr> GraphSearch<Dim>::getOpenSet() const
     return ss;
 }
 
-std::vector<StatePtr> GraphSearch::getCloseSet() const
+template <int Dim, typename ValueT>
+std::vector<StatePtr> GraphSearch<Dim, ValueT>::getCloseSet() const
 {
     std::vector<StatePtr> ss;
     for (size_t i = 0; i < hm_.size(); ++i)
@@ -875,7 +938,8 @@ std::vector<StatePtr> GraphSearch::getCloseSet() const
     return ss;
 }
 
-template <int Dim> std::vector<StatePtr> GraphSearch<Dim>::getAllSet() const
+template <int Dim, typename ValueT>
+std::vector<StatePtr> GraphSearch<Dim, ValueT>::getAllSet() const
 {
     std::vector<StatePtr> ss;
     for (const auto &it : hm_)
@@ -1765,3 +1829,7 @@ void JPS3DNeib::FNeib(int dx, int dy, int dz, int norm1, int dev, int &fx,
         }
     }
 }
+
+template class JPS::GraphSearch<2, double>;
+
+template class JPS::GraphSearch<3, double>;

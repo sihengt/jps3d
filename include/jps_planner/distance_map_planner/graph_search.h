@@ -70,10 +70,18 @@ struct State
  * @brief GraphSearch class
  *
  * Implement A* and Jump Point Search
+ *
+ * @param Dim is the dimension of the workspace
+ * @param ValueT is the map cell value type, forwarded to JPS::MapUtil<Dim,
+ * ValueT>. Defaults to double so existing GraphSearch<Dim> callers keep
+ * compiling unchanged.
  */
-template <int Dim> class GraphSearch
+template <int Dim, typename ValueT = double> class GraphSearch
 {
 public:
+    using TmapValue = ValueT;
+    using Tmap = std::vector<ValueT>;
+
     /**
      * @brief graph search constructor
      *
@@ -81,23 +89,20 @@ public:
      * @param eps weight of heuristic, optional, default as 1
      * @param cweight weight of distance cost, optional, default as 0.1
      * @param verbose flag for printing debug info, optional, default as False
-     * @param thresh_dist cells with value >= this are considered free,
+     * @param thresh_val cells with value >= this are considered free,
      * optional, default as 0
      * @param h_max max potential value, optional, default as 100
      * @param potential_radius maximum radius of concern for potential
      * calculation, optional, default as 0.5
      * @param pow power index for potential calculation, optional, default as 1
      */
-    GraphSearch(const std::shared_ptr<JPS::MapUtil<Dim>> &map_util,
+    GraphSearch(const std::shared_ptr<JPS::MapUtil<Dim, ValueT>> &map_util,
                 double eps = 1, double cweight = 0.1, bool verbose = false,
-                JPS::TmapValue thresh_dist = 0, JPS::TmapValue h_max = 100,
-                JPS::TmapValue potential_radius = 0.5, int pow = 1);
+                TmapValue thresh_val = 0, TmapValue h_max = 100,
+                TmapValue potential_radius = 0.5, int pow = 1);
 
-    /// Set thresh_dist_
-    void setThreshDist(JPS::TmapValue thresh_dist)
-    {
-        thresh_dist_ = thresh_dist;
-    }
+    /// Set thresh_val_
+    void setThreshVal(TmapValue thresh_val) { thresh_val_ = thresh_val; }
 
     /**
      * @brief start 2D planning thread
@@ -166,20 +171,19 @@ private:
     /// Calculate heuristic
     double getHeur(int x, int y, int z) const;
 
-    std::shared_ptr<JPS::MapUtil<Dim>> map_util_;
+    std::shared_ptr<JPS::MapUtil<Dim, ValueT>> map_util_;
     // Raw cost map, aliased to map_util_->map_ (shared, never modified)
-    std::shared_ptr<const JPS::Tmap> cMap_;
+    std::shared_ptr<const Tmap> cMap_;
     int xDim_, yDim_, zDim_;
-    // TODO: to refactor variable name
-    JPS::TmapValue thresh_dist_ = 0;
+    TmapValue thresh_val_ = 0;
     /// weight of heuristic
     double eps_;
     /// weight of distance map
     double cweight_;
     /// max potential value
-    JPS::TmapValue H_MAX;
+    TmapValue H_MAX;
     /// maximum radius of concern, any further not important
-    JPS::TmapValue potential_radius_;
+    TmapValue potential_radius_;
     /// power index for potential calculation
     int pow_;
     bool verbose_;

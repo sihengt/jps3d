@@ -12,10 +12,18 @@
 class GraphSearch;
 /**
  * @brief Abstract base for planning
+ *
+ * @param Dim is the dimension of the workspace
+ * @param ValueT is the map cell value type, forwarded to JPS::MapUtil<Dim,
+ * ValueT> and DMP::GraphSearch<Dim, ValueT>. Defaults to double so existing
+ * DMPlanner<Dim> callers keep compiling unchanged.
  */
-template <int Dim> class DMPlanner
+template <int Dim, typename ValueT = double> class DMPlanner
 {
 public:
+    using TmapValue = ValueT;
+    using Tmap = std::vector<ValueT>;
+
     /**
      * @brief Simple constructor
      * @param verbose enable debug mode
@@ -32,12 +40,12 @@ public:
      */
 
     std::vector<bool> setPath(const vec_Vecf<Dim> &path,
-                              const JPS::TmapValue &radius, bool dense);
+                              const TmapValue &radius, bool dense);
 
     /// Set search radius around a prior path
-    void setSearchRadius(const JPS::TmapValue &r);
+    void setSearchRadius(const TmapValue &r);
     /// Set potential radius
-    void setPotentialRadius(const JPS::TmapValue &r);
+    void setPotentialRadius(const TmapValue &r);
     /// Set heuristic weight
     void setEps(double eps);
     /// Set collision cost weight
@@ -46,10 +54,9 @@ public:
     void setPow(int pow);
     // TODO: improve the description
     /// Set max potential value
-    void setHMax(JPS::TmapValue h_max);
-    // TODO: to refactor variable and function name
-    /// Set thresh_dist_
-    void setThreshDist(JPS::TmapValue val) { thresh_dist_ = val; }
+    void setHMax(TmapValue h_max);
+    /// Set thresh_val_
+    void setThreshVal(TmapValue val) { thresh_val_ = val; }
 
     /**
      * @brief Status of the planner
@@ -76,7 +83,7 @@ public:
     /// Get the searching region
     vec_Vecf<Dim> getSearchRegion();
     /// Get the internal map util
-    std::shared_ptr<JPS::MapUtil<Dim>> getMapUtil();
+    std::shared_ptr<JPS::MapUtil<Dim, ValueT>> getMapUtil();
 
     /**
      * @brief Generate distance map
@@ -85,7 +92,7 @@ public:
      * It shares the map_util, so changes to the original map_util will affect
      * the internal map. The planner itself does not modify the map_util.
      */
-    void setMap(const std::shared_ptr<JPS::MapUtil<Dim>> &map_util);
+    void setMap(const std::shared_ptr<JPS::MapUtil<Dim, ValueT>> &map_util);
 
     /// Compute the optimal path
     bool computePath(const Vecf<Dim> &start, const Vecf<Dim> &goal,
@@ -93,7 +100,7 @@ public:
 
 protected:
     /// Create the mask for potential distance field
-    vec_E<std::pair<Veci<Dim>, JPS::TmapValue>> createMask(int pow);
+    vec_E<std::pair<Veci<Dim>, TmapValue>> createMask(int pow);
     /// Need to be specified in Child class, main planning function
     bool plan(const Vecf<Dim> &start, const Vecf<Dim> &goal, decimal_t eps = 1,
               decimal_t cweight = 0.1);
@@ -105,19 +112,18 @@ protected:
     bool checkAvailability(const Veci<Dim> &pn);
 
     /// Assume using 3D voxel map for all 2d and 3d planning
-    std::shared_ptr<JPS::MapUtil<Dim>> map_util_;
+    std::shared_ptr<JPS::MapUtil<Dim, ValueT>> map_util_;
     /// The planner back-end
     std::shared_ptr<DMP::GraphSearch> graph_search_;
     /// tunnel for visualization
     std::vector<bool> search_region_;
     /// Shared pointer aliasing map_util_'s map data, avoids copying while
     /// keeping map_util_ alive
-    std::shared_ptr<const JPS::Tmap> cmap_;
+    std::shared_ptr<const Tmap> cmap_;
     /// Cached spherical mask offsets used by setPath(), keyed on the radius
     /// that produced it
     vec_Veci<Dim> cached_mask_;
-    JPS::TmapValue cached_mask_radius_ =
-        std::numeric_limits<JPS::TmapValue>::quiet_NaN();
+    TmapValue cached_mask_radius_ = std::numeric_limits<TmapValue>::quiet_NaN();
 
     /// Enabled for printing info
     bool planner_verbose_;
@@ -132,15 +138,15 @@ protected:
     /// Flag indicating the success of planning
     int status_ = 0;
     /// max potential value
-    JPS::TmapValue H_MAX{100};
-    /// Distance >= thresh_dist_ are considered free
-    JPS::TmapValue thresh_dist_{0};
+    TmapValue H_MAX{100};
+    /// Distance >= thresh_val_ are considered free
+    TmapValue thresh_val_{0};
     /// heuristic weight
     double eps_{0.0};
     /// potential weights
     double cweight_{0.1};
     /// maximum radius of concern, any further not important
-    JPS::TmapValue potential_radius_{0.5};
+    TmapValue potential_radius_{0.5};
     /// radius of searching tunnel
     Vecf<Dim> search_radius_{Vecf<Dim>::Zero()};
     /// xy range of local distance map
@@ -155,7 +161,14 @@ typedef DMPlanner<2> DMPlanner2D;
 /// Planner for 3D VoxelMap
 typedef DMPlanner<3> DMPlanner3D;
 
-template <int Dim> class IterativeDMPlanner : public DMPlanner<Dim>
+/**
+ * @param Dim is the dimension of the workspace
+ * @param ValueT is the map cell value type, forwarded to DMPlanner<Dim,
+ * ValueT>. Defaults to double so existing IterativeDMPlanner<Dim> callers
+ * keep compiling unchanged.
+ */
+template <int Dim, typename ValueT = double>
+class IterativeDMPlanner : public DMPlanner<Dim, ValueT>
 {
 public:
     IterativeDMPlanner(bool verbose = false);

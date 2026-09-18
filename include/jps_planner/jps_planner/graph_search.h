@@ -7,15 +7,11 @@
 #define JPS_GRAPH_SEARCH_H
 
 #include <boost/heap/d_ary_heap.hpp> // boost::heap::d_ary_heap
-#include <cstdint>                   // uint16_t
-#include <jps_collision/map_util.h>  // MapUtil, Tmap, TmapValue
-#include <limits>                    // std::numeric_limits
-#include <memory>                    // std::shared_ptr, std::unique_ptr
-#include <unordered_map>             // std::unordered_map
-#include <vector>                    // std::vector
-
-static constexpr double SQRT2 = 1.41421356237309504;
-static constexpr double SQRT3 = 1.73205080756887729;
+#include <jps_collision/map_util.h>
+#include <limits>        // std::numeric_limits
+#include <memory>        // std::shared_ptr
+#include <unordered_map> // std::unordered_map
+#include <vector>        // std::vector
 
 namespace JPS
 {
@@ -85,20 +81,26 @@ struct State
     /// if has been closed
     bool closed = false;
 
-    // Needed so state_pool_'s StateBlock can default-construct a vector<State>
-    // slot; allocateState() overwrites the slot via placement assignment.
     State() = default;
 
     /// 2D constructor
     State(int id, int x, int y, int dx, int dy)
         : id(id), x(x), y(y), dx(dx), dy(dy)
     {
+        parentId = -1;
+        g = std::numeric_limits<double>::infinity();
+        opened = false;
+        closed = false;
     }
 
     /// 3D constructor
     State(int id, int x, int y, int z, int dx, int dy, int dz)
         : id(id), x(x), y(y), z(z), dx(dx), dy(dy), dz(dz)
     {
+        parentId = -1;
+        g = std::numeric_limits<double>::infinity();
+        opened = false;
+        closed = false;
     }
 };
 
@@ -113,7 +115,7 @@ struct JPS2DNeib
     int f1[9][2][2];
     int f2[9][2][2];
     // nsz contains the number of neighbors for the four different types of
-    // moves: no move (norm 0): 8 neighbors always added
+    // moves: no move (norm 0):        8 neighbors always added
     //                          0 forced neighbors to check (never happens)
     //                          0 neighbors to add if forced (never happens)
     // straight (norm 1):       1 neighbor always added
@@ -170,10 +172,18 @@ private:
  * @brief GraphSearch class
  *
  * Implement A* and Jump Point Search
+ *
+ * @param Dim is the dimension of the workspace
+ * @param ValueT is the map cell value type, forwarded to MapUtil<Dim,
+ * ValueT>. Defaults to double so existing GraphSearch<Dim> callers keep
+ * compiling unchanged.
  */
-template <int Dim> class GraphSearch
+template <int Dim, typename ValueT = double> class GraphSearch
 {
 public:
+    using TmapValue = ValueT;
+    using Tmap = std::vector<ValueT>;
+
     /**
      * @brief 2D graph search constructor
      *
@@ -183,7 +193,7 @@ public:
      * @param eps weight of heuristic, optional, default as 1
      * @param verbose flag for printing debug info, optional, default as false
      */
-    GraphSearch(const std::shared_ptr<MapUtil<Dim>> &map_util, int xDim,
+    GraphSearch(const std::shared_ptr<MapUtil<Dim, ValueT>> &map_util, int xDim,
                 int yDim, double eps = 1, bool verbose = false);
     /**
      * @brief 3D graph search constructor
@@ -195,11 +205,11 @@ public:
      * @param eps weight of heuristic, optional, default as 1
      * @param verbose flag for printing debug info, optional, default as False
      */
-    GraphSearch(const std::shared_ptr<MapUtil<Dim>> &map_util, int xDim,
+    GraphSearch(const std::shared_ptr<MapUtil<Dim, ValueT>> &map_util, int xDim,
                 int yDim, int zDim, double eps = 1, bool verbose = false);
 
-    /// Set thresh_dist_
-    void setThreshDist(TmapValue thresh_dist) { thresh_dist_ = thresh_dist; }
+    /// Set thresh_val_
+    void setThreshVal(TmapValue thresh_val) { thresh_val_ = thresh_val; }
 
     /// Set the heuristic weight. The GraphSearch is now built once and
     /// reused across plans (see JPSPlanner::setMapUtil), so eps must be
@@ -297,21 +307,29 @@ private:
     /// Same as hasForced, but takes the id/norm1 already computed by jump()
     bool hasForcedWithId(int x, int y, int z, int id, int norm1);
 
+    /// 2D no-corner-cut test for a diagonal step (dx, dy) from (x, y)
+    bool cutsCorner(int x, int y, int dx, int dy);
+    /// 3D no-corner-cut test for a diagonal step (dx, dy, dz) from (x, y, z)
+    bool cutsCorner(int x, int y, int z, int dx, int dy, int dz);
+
     /// 2D jump, return true iff finding the goal or a jump point
     bool jump(int x, int y, int dx, int dy, int &new_x, int &new_y);
     /// 3D jump, return true iff finding the goal or a jump point
     bool jump(int x, int y, int z, int dx, int dy, int dz, int &new_x,
               int &new_y, int &new_z);
 
-    std::shared_ptr<MapUtil<Dim>> map_util_;
-    // Raw cost map, aliased to map_util_->map_ (shared, never modified)
-    std::shared_ptr<const Tmap> cMap_;
+    /// Initialize 2D jps arrays
+    void init2DJps();
+
+    std::shared_ptr<MapUtil<Dim, ValueT>> map_util_;
+    Tmap cMap_;
     int xDim_, yDim_, zDim_;
-    TmapValue thresh_dist_ = 0;
+    TmapValue thresh_val_ = 0;
     double eps_;
     bool verbose_;
 
     int xGoal_, yGoal_, zGoal_;
+    int goalId_;
     bool use_2d_;
     bool use_jps_ = false;
 
@@ -330,7 +348,7 @@ private:
     // current_block_idx_/current_slot_idx_ rewind to 0 at the start of every
     // plan() call, so once the pool reaches the largest search's footprint,
     // later searches reuse existing blocks with zero new heap allocation.
-    // Safe only because GraphSearch persists across plan() calls --
+    // Safe only because GraphSearch persists across plan() calls (Task 8) --
     // otherwise the pool would be discarded every time.
     static constexpr int kStateBlockSize = 10000;
 

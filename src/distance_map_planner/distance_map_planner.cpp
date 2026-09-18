@@ -1,49 +1,72 @@
 #include <jps_planner/distance_map_planner/distance_map_planner.h>
 
-template <int Dim>
-DMPlanner<Dim>::DMPlanner(bool verbose) : planner_verbose_(verbose)
+template <int Dim, typename ValueT>
+DMPlanner<Dim, ValueT>::DMPlanner(bool verbose) : planner_verbose_(verbose)
 {
     planner_verbose_ = verbose;
     if (planner_verbose_)
         printf(ANSI_COLOR_CYAN "DMP PLANNER VERBOSE ON\n" ANSI_COLOR_RESET);
 }
 
-template <int Dim> void DMPlanner<Dim>::setSearchRadius(const Vecf<Dim> &r)
+template <int Dim, typename ValueT>
+void DMPlanner<Dim, ValueT>::setSearchRadius(const Vecf<Dim> &r)
 {
     search_radius_ = r;
 }
 
-template <int Dim> void DMPlanner<Dim>::setPotentialRadius(const Vecf<Dim> &r)
+template <int Dim, typename ValueT>
+void DMPlanner<Dim, ValueT>::setPotentialRadius(const Vecf<Dim> &r)
 {
     potential_radius_ = r;
 }
 
-template <int Dim> void DMPlanner<Dim>::setEps(double eps) { eps_ = eps; }
+template <int Dim, typename ValueT>
+void DMPlanner<Dim, ValueT>::setEps(double eps)
+{
+    eps_ = eps;
+}
 
-template <int Dim> void DMPlanner<Dim>::setCweight(double c) { cweight_ = c; }
+template <int Dim, typename ValueT>
+void DMPlanner<Dim, ValueT>::setCweight(double c)
+{
+    cweight_ = c;
+}
 
-template <int Dim> void DMPlanner<Dim>::setPow(int pow) { pow_ = pow; }
-template <int Dim> void DMPlanner<Dim>::setHMax(JPS::TmapValue h_max)
+template <int Dim, typename ValueT> void DMPlanner<Dim, ValueT>::setPow(int pow)
+{
+    pow_ = pow;
+}
+template <int Dim, typename ValueT>
+void DMPlanner<Dim, ValueT>::setHMax(TmapValue h_max)
 {
     H_MAX = h_max;
 }
 
-template <int Dim> int DMPlanner<Dim>::status() { return status_; }
+template <int Dim, typename ValueT> int DMPlanner<Dim, ValueT>::status()
+{
+    return status_;
+}
 
-template <int Dim> vec_Vecf<Dim> DMPlanner<Dim>::getPath() { return path_; }
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> DMPlanner<Dim, ValueT>::getPath()
+{
+    return path_;
+}
 
-template <int Dim> vec_Vecf<Dim> DMPlanner<Dim>::getRawPath()
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> DMPlanner<Dim, ValueT>::getRawPath()
 {
     return raw_path_;
 }
 
-template <int Dim> vec_Vecf<Dim> DMPlanner<Dim>::getPriorPath()
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> DMPlanner<Dim, ValueT>::getPriorPath()
 {
     return prior_path_;
 }
 
-template <int Dim>
-vec_Vecf<Dim> DMPlanner<Dim>::removeCornerPts(const vec_Vecf<Dim> &path)
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> DMPlanner<Dim, ValueT>::removeCornerPts(const vec_Vecf<Dim> &path)
 {
     if (path.size() < 3)
         return path;
@@ -93,8 +116,8 @@ vec_Vecf<Dim> DMPlanner<Dim>::removeCornerPts(const vec_Vecf<Dim> &path)
     return optimized_path;
 }
 
-template <int Dim>
-vec_Vecf<Dim> DMPlanner<Dim>::removeLinePts(const vec_Vecf<Dim> &path)
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> DMPlanner<Dim, ValueT>::removeLinePts(const vec_Vecf<Dim> &path)
 {
     if (path.size() < 3)
         return path;
@@ -119,7 +142,8 @@ vec_Vecf<Dim> DMPlanner<Dim>::removeLinePts(const vec_Vecf<Dim> &path)
     return new_path;
 }
 
-template <int Dim> vec_Vecf<Dim> DMPlanner<Dim>::getOpenSet() const
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> DMPlanner<Dim, ValueT>::getOpenSet() const
 {
     vec_Vecf<Dim> ps;
     const auto ss = graph_search_->getOpenSet();
@@ -137,7 +161,8 @@ template <int Dim> vec_Vecf<Dim> DMPlanner<Dim>::getOpenSet() const
     return ps;
 }
 
-template <int Dim> vec_Vecf<Dim> DMPlanner<Dim>::getCloseSet() const
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> DMPlanner<Dim, ValueT>::getCloseSet() const
 {
     vec_Vecf<Dim> ps;
     const auto ss = graph_search_->getCloseSet();
@@ -155,7 +180,8 @@ template <int Dim> vec_Vecf<Dim> DMPlanner<Dim>::getCloseSet() const
     return ps;
 }
 
-template <int Dim> vec_Vecf<Dim> DMPlanner<Dim>::getAllSet() const
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> DMPlanner<Dim, ValueT>::getAllSet() const
 {
     vec_Vecf<Dim> ps;
     const auto ss = graph_search_->getAllSet();
@@ -173,9 +199,10 @@ template <int Dim> vec_Vecf<Dim> DMPlanner<Dim>::getAllSet() const
     return ps;
 }
 
-template <int Dim>
-std::vector<bool> DMPlanner<Dim>::setPath(const vec_Vecf<Dim> &path,
-                                          const Vecf<Dim> &radius, bool dense)
+template <int Dim, typename ValueT>
+std::vector<bool> DMPlanner<Dim, ValueT>::setPath(const vec_Vecf<Dim> &path,
+                                                  const Vecf<Dim> &radius,
+                                                  bool dense)
 {
     prior_path_ = path;
     // create cells along path
@@ -278,7 +305,8 @@ std::vector<bool> DMPlanner<Dim>::setPath(const vec_Vecf<Dim> &path,
     return in_region;
 }
 
-template <int Dim> vec_Vecf<Dim> DMPlanner<Dim>::getSearchRegion()
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> DMPlanner<Dim, ValueT>::getSearchRegion()
 {
     auto dim = map_util_->getDim();
     vec_Vecf<Dim> pts;
@@ -319,13 +347,14 @@ template <int Dim> vec_Vecf<Dim> DMPlanner<Dim>::getSearchRegion()
     return pts;
 }
 
-template <int Dim>
-std::shared_ptr<JPS::MapUtil<Dim>> DMPlanner<Dim>::getMapUtil()
+template <int Dim, typename ValueT>
+std::shared_ptr<JPS::MapUtil<Dim, ValueT>> DMPlanner<Dim, ValueT>::getMapUtil()
 {
     return map_util_;
 }
 
-template <int Dim> bool DMPlanner<Dim>::checkAvailability(const Veci<Dim> &pn)
+template <int Dim, typename ValueT>
+bool DMPlanner<Dim, ValueT>::checkAvailability(const Veci<Dim> &pn)
 {
     if (map_util_->isUnknown(pn))
     {
@@ -347,7 +376,7 @@ template <int Dim> bool DMPlanner<Dim>::checkAvailability(const Veci<Dim> &pn)
         return false;
     }
     int linear_idx = map_util_->getIndex(pn);
-    if (!map_util_->isFree(linear_idx, thresh_dist_))
+    if (!map_util_->isFree(linear_idx, thresh_val_))
     {
         if (planner_verbose_)
             printf(ANSI_COLOR_RED "point is occupied!\n" ANSI_COLOR_RESET);
@@ -356,7 +385,8 @@ template <int Dim> bool DMPlanner<Dim>::checkAvailability(const Veci<Dim> &pn)
     return true;
 }
 
-template <int Dim> vec_Vec3f DMPlanner<Dim>::getCloud(double h_max)
+template <int Dim, typename ValueT>
+vec_Vec3f DMPlanner<Dim, ValueT>::getCloud(double h_max)
 {
     if (!cmap_)
         return {};
@@ -408,8 +438,8 @@ template <int Dim> vec_Vec3f DMPlanner<Dim>::getCloud(double h_max)
     return ps;
 }
 
-template <int Dim>
-vec_E<std::pair<Veci<Dim>, int8_t>> DMPlanner<Dim>::createMask(int pow)
+template <int Dim, typename ValueT>
+vec_E<std::pair<Veci<Dim>, int8_t>> DMPlanner<Dim, ValueT>::createMask(int pow)
 {
     /// Mask for generating potential field around obstacle
     vec_E<std::pair<Veci<Dim>, int8_t>> mask;
@@ -462,11 +492,12 @@ vec_E<std::pair<Veci<Dim>, int8_t>> DMPlanner<Dim>::createMask(int pow)
     return mask;
 }
 
-template <int Dim>
-void DMPlanner<Dim>::setMap(const std::shared_ptr<JPS::MapUtil<Dim>> &map_util,
-                            const Vecf<Dim> &pos)
+template <int Dim, typename ValueT>
+void DMPlanner<Dim, ValueT>::setMap(
+    const std::shared_ptr<JPS::MapUtil<Dim, ValueT>> &map_util,
+    const Vecf<Dim> &pos)
 {
-    map_util_ = std::make_shared<JPS::MapUtil<Dim>>(*map_util);
+    map_util_ = map_util;
     const auto mask = createMask(pow_);
     // compute a 2D local distance map
     const auto dim = map_util_->getDim();
@@ -553,9 +584,9 @@ void DMPlanner<Dim>::setMap(const std::shared_ptr<JPS::MapUtil<Dim>> &map_util,
                       map_util_->getRes());
 }
 
-template <int Dim>
-bool DMPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
-                          decimal_t eps, decimal_t cweight)
+template <int Dim, typename ValueT>
+bool DMPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
+                                  decimal_t eps, decimal_t cweight)
 {
     if (planner_verbose_)
     {
@@ -601,8 +632,8 @@ bool DMPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
 
     const Veci<Dim> dim = map_util_->getDim();
 
-    graph_search_ = std::make_shared<DMP::GraphSearch<Dim>>(
-        map_util_, eps, cweight, planner_verbose_, thresh_dist_, H_MAX,
+    graph_search_ = std::make_shared<DMP::GraphSearch<Dim, ValueT>>(
+        map_util_, eps, cweight, planner_verbose_, thresh_val_, H_MAX,
         potential_radius_, pow_);
 
     if (Dim == 3)
@@ -656,9 +687,10 @@ bool DMPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
     return true;
 }
 
-template <int Dim>
-bool DMPlanner<Dim>::computePath(const Vecf<Dim> &start, const Vecf<Dim> &goal,
-                                 const vec_Vecf<Dim> &path)
+template <int Dim, typename ValueT>
+bool DMPlanner<Dim, ValueT>::computePath(const Vecf<Dim> &start,
+                                         const Vecf<Dim> &goal,
+                                         const vec_Vecf<Dim> &path)
 {
     if (planner_verbose_)
     {
@@ -679,21 +711,21 @@ bool DMPlanner<Dim>::computePath(const Vecf<Dim> &start, const Vecf<Dim> &goal,
     return plan(start, goal, eps_, cweight_);
 }
 
-template class DMPlanner<2>;
+template class DMPlanner<2, double>;
 
-template class DMPlanner<3>;
+template class DMPlanner<3, double>;
 
-template <int Dim>
-IterativeDMPlanner<Dim>::IterativeDMPlanner(bool verbose)
-    : DMPlanner<Dim>(verbose)
+template <int Dim, typename ValueT>
+IterativeDMPlanner<Dim, ValueT>::IterativeDMPlanner(bool verbose)
+    : DMPlanner<Dim, ValueT>(verbose)
 {
     if (this->planner_verbose_)
         printf(ANSI_COLOR_CYAN
                "Iterative DMP PLANNER VERBOSE ON\n" ANSI_COLOR_RESET);
 }
 
-template <int Dim>
-bool IterativeDMPlanner<Dim>::iterativeComputePath(
+template <int Dim, typename ValueT>
+bool IterativeDMPlanner<Dim, ValueT>::iterativeComputePath(
     const Vecf<Dim> &start, const Vecf<Dim> &goal,
     const vec_Vecf<Dim> &prior_path, int max_iteration)
 {
@@ -739,6 +771,6 @@ bool IterativeDMPlanner<Dim>::iterativeComputePath(
     return true;
 }
 
-template class IterativeDMPlanner<2>;
+template class IterativeDMPlanner<2, double>;
 
-template class IterativeDMPlanner<3>;
+template class IterativeDMPlanner<3, double>;

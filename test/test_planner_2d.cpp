@@ -1,6 +1,7 @@
 #include "read_map.hpp"
 #include "timer.hpp"
 #include <jps_basis/data_utils.h>
+#include <jps_collision/map_util_voxel.h>
 #include <jps_planner/jps_planner/jps_planner.h>
 
 #include <boost/geometry.hpp>
@@ -101,7 +102,7 @@ int main(int argc, char **argv)
     {
         for (int y = 0; y < dim(1); y++)
         {
-            if (!map_util->isFree(Vec2i(x, y)))
+            if (!map_util->isFree(Vec2i(x, y), 0.0))
             {
                 Vec2f pt = map_util->intToFloat(Vec2i(x, y));
                 point_2d a;

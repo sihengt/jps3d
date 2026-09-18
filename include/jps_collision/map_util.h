@@ -1,400 +1,124 @@
 /**
  * @file map_util.h
- * @brief MapUtil classes
+ * @brief MapUtil abstract base class
  */
 #ifndef JPS_MAP_UTIL_H
 #define JPS_MAP_UTIL_H
 
-#include <cmath>
-#include <iostream>
-#include <limits>
 #include <jps_basis/data_type.h>
 
 namespace JPS
 {
-/// The type of map data Tmap is defined as a 1D array
-using TmapValue = signed char;
+/// The type of map data Tmap is defined as a 1D array. Kept as free aliases
+/// (= double) for backward compatibility with non-templated files that use
+/// these names directly; MapUtil and its templated owners below use their
+/// own nested TmapValue/Tmap (bound to ValueT) instead.
+using TmapValue = double;
 using Tmap = std::vector<TmapValue>;
+
 /**
- * @brief The map util class for collision checking
+ * @brief Abstract interface for the map util classes used for collision
+ * checking
  * @param Dim is the dimension of the workspace
+ * @param ValueT is the type of a single map cell's value. Defaults to
+ * double so every existing MapUtil<Dim> caller keeps compiling unchanged;
+ * a future backend (e.g. an int8_t-based octomap) can swap this via
+ * MapUtil<Dim, int8_t> without touching anything else.
+ *
+ * Map-implementation independent: has no dependency on any concrete map
+ * backend.
  */
-template <int Dim> class MapUtil
+template <int Dim, typename ValueT = double> class MapUtil
 {
 public:
-    /// Simple constructor
-    MapUtil() {}
+    /// Nested value-type aliases, bound to ValueT. Unqualified TmapValue/Tmap
+    /// used below (and in derived classes) resolve to these rather than the
+    /// free JPS::TmapValue/JPS::Tmap aliases above.
+    using TmapValue = ValueT;
+    using Tmap = std::vector<ValueT>;
+
+    virtual ~MapUtil() = default;
+
+    /// Refresh the virtual ceiling/floor and any other state that depends on
+    /// the map having possibly slid. Must be called whenever the map may
+    /// have slid (i.e. at the start of every plan()).
+    virtual void updateVirtualCeilingFloor() = 0;
+
     /// Get map data
-    Tmap getMap() { return map_; }
+    virtual Tmap getMap() = 0;
     /// Get resolution
-    decimal_t getRes() { return res_; }
+    virtual decimal_t getRes() = 0;
     /// Get dimensions
-    Veci<Dim> getDim() { return dim_; }
+    virtual Veci<Dim> getDim() const = 0;
     /// Get origin
-    Vecf<Dim> getOrigin() { return origin_d_; }
+    virtual Vecf<Dim> getOrigin() = 0;
+    /// Get the min/max corners of the *live* map's currently valid region
+    virtual void getLocalMapBound(Vecf<Dim> &map_min, Vecf<Dim> &map_max) = 0;
     /// Get index of a cell
-    int getIndex(const Veci<Dim> &pn)
-    {
-        return Dim == 2 ? pn(0) + dim_(0) * pn(1)
-                        : pn(0) + dim_(0) * pn(1) + dim_(0) * dim_(1) * pn(2);
-    }
+    virtual int getIndex(const Veci<Dim> &pn) = 0;
 
     /// Check if the given cell is outside of the map in i-the dimension
-    bool isOutsideXYZ(const Veci<Dim> &n, int i)
-    {
-        return n(i) < 0 || n(i) >= dim_(i);
-    }
+    virtual bool isOutsideXYZ(const Veci<Dim> &n, int i) = 0;
     /// Check if the cell is free by index
-    bool isFree(int idx) { return map_[idx] == val_free; }
+    virtual bool isFree(int idx, TmapValue val) = 0;
     /// Check if the cell is unknown by index
-    bool isUnknown(int idx) { return map_[idx] == val_unknown; }
+    virtual bool isUnknown(int idx) = 0;
     /// Check if the cell is occupied by index
-    bool isOccupied(int idx) { return map_[idx] > val_free; }
-
+    virtual bool isOccupied(int idx, TmapValue val) = 0;
     /// Check if the cell is outside by coordinate
-    bool isOutside(const Veci<Dim> &pn)
-    {
-        for (int i = 0; i < Dim; i++)
-            if (pn(i) < 0 || pn(i) >= dim_(i))
-                return true;
-        return false;
-    }
+    virtual bool isOutside(const Veci<Dim> &pn) = 0;
     /// Check if the given cell is free by coordinate
-    bool isFree(const Veci<Dim> &pn)
-    {
-        if (isOutside(pn))
-            return false;
-        // pn(Dim - 1) rather than the literal pn(2): for Dim == 2 this reads
-        // pn(1), which is in-bounds for a 2-element Veci, so the 2D
-        // instantiation still compiles. The Dim == 3 guard means it's never
-        // actually evaluated at runtime for Dim == 2.
-        if (Dim == 3 && pn(Dim - 1) >= ceiling_cell_z_)
-            return false;
-        return isFree(getIndex(pn));
-    }
+    virtual bool isFree(const Veci<Dim> &pn, TmapValue val) = 0;
     /// Check if the given cell is occupied by coordinate
-    bool isOccupied(const Veci<Dim> &pn)
-    {
-        if (isOutside(pn))
-            return false;
-        if (Dim == 3 && pn(Dim - 1) >= ceiling_cell_z_)
-            return true;
-        return isOccupied(getIndex(pn));
-    }
+    virtual bool isOccupied(const Veci<Dim> &pn, TmapValue val) = 0;
     /// Check if the given cell is unknown by coordinate
-    bool isUnknown(const Veci<Dim> &pn)
-    {
-        if (isOutside(pn))
-            return false;
-        return map_[getIndex(pn)] == val_unknown;
-    }
+    virtual bool isUnknown(const Veci<Dim> &pn) = 0;
 
     /**
-     * @brief Set map
+     * @brief Update map
      *
      * @param ori origin position
-     * @param dim number of cells in each dimension
-     * @param map array of cell values
-     * @param res map resolution
      */
-    void setMap(const Vecf<Dim> &ori, const Veci<Dim> &dim, const Tmap &map,
-                decimal_t res)
-    {
-        map_ = map;
-        dim_ = dim;
-        origin_d_ = ori;
-        res_ = res;
-    }
-
-    /**
-     * @brief Set a virtual ceiling
-     *
-     * Any cell whose vertical extent reaches or exceeds this world-frame Z
-     * height (meters) is treated as occupied by isFree()/isOccupied(),
-     * regardless of what the underlying map data says. Must be called after
-     * setMap(), since it depends on origin/resolution. Pass a non-finite
-     * value (e.g. +infinity, the default) to disable. No-op for Dim == 2
-     * (no Z axis).
-     */
-    void setCeiling(decimal_t max_z)
-    {
-        if (Dim == 3 && std::isfinite(max_z))
-            ceiling_cell_z_ = static_cast<int>(
-                std::floor((max_z - origin_d_(Dim - 1)) / res_));
-        else
-            ceiling_cell_z_ = std::numeric_limits<int>::max();
-    }
+    virtual void setMap(const Vecf<Dim> &ori) = 0;
 
     /// Print basic information about the util
-    void info()
-    {
-        Vecf<Dim> range = dim_.template cast<decimal_t>() * res_;
-        std::cout << "MapUtil Info ========================== " << std::endl;
-        std::cout << "   res: [" << res_ << "]" << std::endl;
-        std::cout << "   origin: [" << origin_d_.transpose() << "]"
-                  << std::endl;
-        std::cout << "   range: [" << range.transpose() << "]" << std::endl;
-        std::cout << "   dim: [" << dim_.transpose() << "]" << std::endl;
-    };
+    virtual void info() = 0;
 
     /// Float position to discrete cell coordinate
-    Veci<Dim> floatToInt(const Vecf<Dim> &pt)
-    {
-        Veci<Dim> pn;
-        for (int i = 0; i < Dim; i++)
-            pn(i) = std::round((pt(i) - origin_d_(i)) / res_ - 0.5);
-        return pn;
-    }
+    virtual Veci<Dim> floatToInt(const Vecf<Dim> &pt) = 0;
     /// Discrete cell coordinate to float position
-    Vecf<Dim> intToFloat(const Veci<Dim> &pn)
-    {
-        // return pn.template cast<decimal_t>() * res_ + origin_d_;
-        return (pn.template cast<decimal_t>() + Vecf<Dim>::Constant(0.5)) *
-                   res_ +
-               origin_d_;
-    }
+    virtual Vecf<Dim> intToFloat(const Veci<Dim> &pn) = 0;
 
     /// Raytrace from float point pt1 to pt2
-    vec_Veci<Dim> rayTrace(const Vecf<Dim> &pt1, const Vecf<Dim> &pt2)
-    {
-        Vecf<Dim> diff = pt2 - pt1;
-        decimal_t k = 0.8;
-        int max_diff = (diff / res_).template lpNorm<Eigen::Infinity>() / k;
-        decimal_t s = 1.0 / max_diff;
-        Vecf<Dim> step = diff * s;
-
-        vec_Veci<Dim> pns;
-        Veci<Dim> prev_pn = Veci<Dim>::Constant(-1);
-        for (int n = 1; n < max_diff; n++)
-        {
-            Vecf<Dim> pt = pt1 + step * n;
-            Veci<Dim> new_pn = floatToInt(pt);
-            if (isOutside(new_pn))
-                break;
-            if (new_pn != prev_pn)
-                pns.push_back(new_pn);
-            prev_pn = new_pn;
-        }
-        return pns;
-    }
+    virtual vec_Veci<Dim> rayTrace(const Vecf<Dim> &pt1,
+                                   const Vecf<Dim> &pt2) = 0;
 
     /// Check if the ray from p1 to p2 is occluded
-    bool isBlocked(const Vecf<Dim> &p1, const Vecf<Dim> &p2, int8_t val = 100)
-    {
-        vec_Veci<Dim> pns = rayTrace(p1, p2);
-        for (const auto &pn : pns)
-        {
-            if (map_[getIndex(pn)] >= val)
-                return true;
-        }
-        return false;
-    }
+    virtual bool isBlocked(const Vecf<Dim> &p1, const Vecf<Dim> &p2,
+                           TmapValue val) = 0;
+    virtual bool isBlocked(const Vecf<Dim> &p1, const Vecf<Dim> &p2) = 0;
+
+    /// Search for the nearest free cell to seed_pos, within
+    /// nearest_free_search_radius_m_.
+    virtual bool getNearestKnownFreePos(const Vecf<Dim> &seed_pos,
+                                        Vecf<Dim> &nearest_pos) = 0;
+
+    /// Find where the segment (from, to) crosses the live local map's
+    /// bounding box (see getLocalMapBound()), writing the crossing point
+    /// to hit. Returns false if the segment never crosses the box.
+    virtual bool lineIntersectMapBound(const Vecf<Dim> &from,
+                                       const Vecf<Dim> &to, Vecf<Dim> &hit) = 0;
 
     /// Get occupied voxels
-    vec_Vecf<Dim> getCloud()
-    {
-        vec_Vecf<Dim> cloud;
-        Veci<Dim> n;
-        if (Dim == 3)
-        {
-            for (n(0) = 0; n(0) < dim_(0); n(0)++)
-            {
-                for (n(1) = 0; n(1) < dim_(1); n(1)++)
-                {
-                    for (n(2) = 0; n(2) < dim_(2); n(2)++)
-                    {
-                        if (isOccupied(getIndex(n)))
-                            cloud.push_back(intToFloat(n));
-                    }
-                }
-            }
-        }
-        else if (Dim == 2)
-        {
-            for (n(0) = 0; n(0) < dim_(0); n(0)++)
-            {
-                for (n(1) = 0; n(1) < dim_(1); n(1)++)
-                {
-                    if (isOccupied(getIndex(n)))
-                        cloud.push_back(intToFloat(n));
-                }
-            }
-        }
-
-        return cloud;
-    }
-
+    virtual vec_Vecf<Dim> getCloud() = 0;
     /// Get free voxels
-    vec_Vecf<Dim> getFreeCloud()
-    {
-        vec_Vecf<Dim> cloud;
-        Veci<Dim> n;
-        if (Dim == 3)
-        {
-            for (n(0) = 0; n(0) < dim_(0); n(0)++)
-            {
-                for (n(1) = 0; n(1) < dim_(1); n(1)++)
-                {
-                    for (n(2) = 0; n(2) < dim_(2); n(2)++)
-                    {
-                        if (isFree(getIndex(n)))
-                            cloud.push_back(intToFloat(n));
-                    }
-                }
-            }
-        }
-        else if (Dim == 2)
-        {
-            for (n(0) = 0; n(0) < dim_(0); n(0)++)
-            {
-                for (n(1) = 0; n(1) < dim_(1); n(1)++)
-                {
-                    if (isFree(getIndex(n)))
-                        cloud.push_back(intToFloat(n));
-                }
-            }
-        }
-
-        return cloud;
-    }
-
+    virtual vec_Vecf<Dim> getFreeCloud() = 0;
     /// Get unknown voxels
-    vec_Vecf<Dim> getUnknownCloud()
-    {
-        vec_Vecf<Dim> cloud;
-        Veci<Dim> n;
-        if (Dim == 3)
-        {
-            for (n(0) = 0; n(0) < dim_(0); n(0)++)
-            {
-                for (n(1) = 0; n(1) < dim_(1); n(1)++)
-                {
-                    for (n(2) = 0; n(2) < dim_(2); n(2)++)
-                    {
-                        if (isUnknown(getIndex(n)))
-                            cloud.push_back(intToFloat(n));
-                    }
-                }
-            }
-        }
-        else if (Dim == 2)
-        {
-            for (n(0) = 0; n(0) < dim_(0); n(0)++)
-            {
-                for (n(1) = 0; n(1) < dim_(1); n(1)++)
-                {
-                    if (isUnknown(getIndex(n)))
-                        cloud.push_back(intToFloat(n));
-                }
-            }
-        }
+    virtual vec_Vecf<Dim> getUnknownCloud() = 0;
 
-        return cloud;
-    }
-
-    /// Dilate occupied cells
-    void dilate(const vec_Veci<Dim> &dilate_neighbor)
-    {
-        Tmap map = map_;
-        Veci<Dim> n = Veci<Dim>::Zero();
-        if (Dim == 3)
-        {
-            for (n(0) = 0; n(0) < dim_(0); n(0)++)
-            {
-                for (n(1) = 0; n(1) < dim_(1); n(1)++)
-                {
-                    for (n(2) = 0; n(2) < dim_(2); n(2)++)
-                    {
-                        if (isOccupied(getIndex(n)))
-                        {
-                            for (const auto &it : dilate_neighbor)
-                            {
-                                if (!isOutside(n + it))
-                                    map[getIndex(n + it)] = val_occ;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        else if (Dim == 2)
-        {
-            for (n(0) = 0; n(0) < dim_(0); n(0)++)
-            {
-                for (n(1) = 0; n(1) < dim_(1); n(1)++)
-                {
-                    if (isOccupied(getIndex(n)))
-                    {
-                        for (const auto &it : dilate_neighbor)
-                        {
-                            if (!isOutside(n + it))
-                                map[getIndex(n + it)] = val_occ;
-                        }
-                    }
-                }
-            }
-        }
-
-        map_ = map;
-    }
-
-    /// Free unknown voxels
-    void freeUnknown()
-    {
-        Veci<Dim> n;
-        if (Dim == 3)
-        {
-            for (n(0) = 0; n(0) < dim_(0); n(0)++)
-            {
-                for (n(1) = 0; n(1) < dim_(1); n(1)++)
-                {
-                    for (n(2) = 0; n(2) < dim_(2); n(2)++)
-                    {
-                        if (isUnknown(getIndex(n)))
-                            map_[getIndex(n)] = val_free;
-                    }
-                }
-            }
-        }
-        else if (Dim == 2)
-        {
-            for (n(0) = 0; n(0) < dim_(0); n(0)++)
-            {
-                for (n(1) = 0; n(1) < dim_(1); n(1)++)
-                {
-                    if (isUnknown(getIndex(n)))
-                        map_[getIndex(n)] = val_free;
-                }
-            }
-        }
-    }
-
-    /// Map entity
-    Tmap map_;
-
-protected:
-    /// Resolution
-    decimal_t res_;
-    /// Origin, float type
-    Vecf<Dim> origin_d_;
-    /// Dimension, int type
-    Veci<Dim> dim_;
-    /// Assume occupied cell has value 100
-    int8_t val_occ = 100;
-    /// Assume free cell has value 0
-    int8_t val_free = 0;
-    /// Assume unknown cell has value -1
-    int8_t val_unknown = -1;
-    /// Cell index at/above which a cell is treated as occupied by
-    /// isFree()/isOccupied(), regardless of map data. Set via setCeiling().
-    /// std::numeric_limits<int>::max() (the default) disables it, since no
-    /// real dim_(Dim-1) ever reaches that value.
-    int ceiling_cell_z_ = std::numeric_limits<int>::max();
+    virtual void setThreshVal(decimal_t thresh_val) = 0;
+    virtual decimal_t getThreshDist() = 0;
 };
-
-typedef MapUtil<2> OccMapUtil;
-
-typedef MapUtil<3> VoxelMapUtil;
 
 } // namespace JPS
 

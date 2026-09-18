@@ -13,17 +13,8 @@ endif()
 
 set(BUILD_SHARED_LIBS ON)
 
-find_package(ament_cmake REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(PkgConfig REQUIRED)
-find_package(rclcpp REQUIRED)
-find_package(nav_msgs REQUIRED)
-find_package(geometry_msgs REQUIRED)
-find_package(sensor_msgs REQUIRED)
-find_package(visualization_msgs REQUIRED)
-find_package(std_msgs REQUIRED)
-find_package(octomap_msgs REQUIRED)
-find_package(octomap REQUIRED)
 
 PKG_CHECK_MODULES(YAMLCPP REQUIRED yaml-cpp)
 if(YAMLCPP_FOUND)
@@ -38,22 +29,26 @@ add_library(jps_lib src/jps_planner/graph_search.cpp
   src/jps_planner/jps_planner.cpp)
 target_compile_options(jps_lib PRIVATE -Wno-implicit-fallthrough)
 
-add_library(dmp_lib src/distance_map_planner/graph_search.cpp
-  src/distance_map_planner/distance_map_planner.cpp)
+# TODO: dmp_lib (distance_map_planner) is currently broken independent of the
+# standalone-build work here (pre-existing map_util_/TmapValue-vs-Vecf type
+# errors) -- disabled until fixed in a separate pass.
+# add_library(dmp_lib src/distance_map_planner/graph_search.cpp
+#   src/distance_map_planner/distance_map_planner.cpp)
 
-add_executable(create_map test/create_map.cpp)
-target_link_libraries(create_map ${YAMLCPP_LIBRARIES})
+# TODO: remove ros dependency for now
+# add_executable(create_map test/create_map.cpp)
+# target_link_libraries(create_map ${YAMLCPP_LIBRARIES})
 
-add_executable(jps3d_node src/jps3d_node.cpp)
-target_include_directories(jps3d_node PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
-target_compile_features(jps3d_node PUBLIC c_std_99 cxx_std_17)
-target_include_directories(jps3d_node PUBLIC ${OCTOMAP_INCLUDE_DIRS})
-target_link_libraries(jps3d_node jps_lib ${OCTOMAP_LIBRARIES})
-ament_target_dependencies(jps3d_node
-  rclcpp nav_msgs geometry_msgs sensor_msgs visualization_msgs std_msgs
-  octomap_msgs octomap)
+# add_executable(jps3d_node src/jps3d_node.cpp)
+# target_include_directories(jps3d_node PUBLIC
+#   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+#   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
+# target_compile_features(jps3d_node PUBLIC c_std_99 cxx_std_17)
+# target_include_directories(jps3d_node PUBLIC ${OCTOMAP_INCLUDE_DIRS})
+# target_link_libraries(jps3d_node jps_lib ${OCTOMAP_LIBRARIES})
+# ament_target_dependencies(jps3d_node
+#   rclcpp nav_msgs geometry_msgs sensor_msgs visualization_msgs std_msgs
+#   octomap_msgs octomap)
 
 include(CTest)
 
@@ -82,30 +77,31 @@ add_test(test_planner_ceiling test_planner_ceiling ${CMAKE_SOURCE_DIR}/data/simp
 # add_test(test_distance_map_planner_2d test_distance_map_planner_2d ${CMAKE_SOURCE_DIR}/data/corridor.yaml)
 
 
-install(FILES "${PROJECT_NAME}Config.cmake" "${PROJECT_NAME}ConfigVersion.cmake"
-  DESTINATION "share/${PROJECT_NAME}/cmake")
+# TODO: ros stuff
+# install(FILES "${PROJECT_NAME}Config.cmake" "${PROJECT_NAME}ConfigVersion.cmake"
+#   DESTINATION "share/${PROJECT_NAME}/cmake")
 
-install(TARGETS jps_lib dmp_lib
-  RUNTIME DESTINATION bin
-  LIBRARY DESTINATION lib
-  ARCHIVE DESTINATION lib)
+# install(TARGETS jps_lib dmp_lib
+#   RUNTIME DESTINATION bin
+#   LIBRARY DESTINATION lib
+#   ARCHIVE DESTINATION lib)
 
-install(DIRECTORY include/jps_basis include/jps_planner include/jps_collision
-  DESTINATION include)
+# install(DIRECTORY include/jps_basis include/jps_planner include/jps_collision
+#   DESTINATION include)
 
-install(TARGETS jps3d_node
-  DESTINATION lib/${PROJECT_NAME})
+# install(TARGETS jps3d_node
+#   DESTINATION lib/${PROJECT_NAME})
 
-install(PROGRAMS
-  scripts/rviz_goal_client.py
-  scripts/waypoint_sequencer.py
-  scripts/waypoint_sequencer_logic.py
-  DESTINATION lib/${PROJECT_NAME}
-)
+# install(PROGRAMS
+#   scripts/rviz_goal_client.py
+#   scripts/waypoint_sequencer.py
+#   scripts/waypoint_sequencer_logic.py
+#   DESTINATION lib/${PROJECT_NAME}
+# )
 
-install(DIRECTORY launch/
-  DESTINATION share/${PROJECT_NAME}/launch
-)
-install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
+# install(DIRECTORY launch/
+#   DESTINATION share/${PROJECT_NAME}/launch
+# )
+# install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
 
-ament_package()
+# ament_package()
