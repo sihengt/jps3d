@@ -68,6 +68,10 @@ add_executable(test_map_util_ceiling test/test_map_util_ceiling.cpp)
 target_link_libraries(test_map_util_ceiling jps_lib)
 add_test(test_map_util_ceiling test_map_util_ceiling)
 
+add_executable(test_map_util_dilate test/test_map_util_dilate.cpp)
+target_link_libraries(test_map_util_dilate jps_lib)
+add_test(test_map_util_dilate test_map_util_dilate)
+
 add_executable(test_planner_ceiling test/test_planner_ceiling.cpp)
 target_link_libraries(test_planner_ceiling jps_lib ${YAMLCPP_LIBRARIES})
 add_test(test_planner_ceiling test_planner_ceiling ${CMAKE_SOURCE_DIR}/data/simple3d.yaml)

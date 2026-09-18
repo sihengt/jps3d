@@ -387,6 +387,31 @@ public:
         map_ = map;
     }
 
+    /// Convenience wrapper around dilate(): inflates every occupied cell by
+    /// `cells` in each dimension (Chebyshev radius, i.e. the same cube
+    /// neighborhood dilate() already takes explicitly), so callers don't
+    /// have to hand-build the offset list themselves.
+    void dilateByRadius(int cells)
+    {
+        vec_Veci<Dim> neighbors;
+        if constexpr (Dim == 3)
+        {
+            for (int dx = -cells; dx <= cells; ++dx)
+                for (int dy = -cells; dy <= cells; ++dy)
+                    for (int dz = -cells; dz <= cells; ++dz)
+                        if (dx || dy || dz)
+                            neighbors.push_back(Veci<Dim>(dx, dy, dz));
+        }
+        else
+        {
+            for (int dx = -cells; dx <= cells; ++dx)
+                for (int dy = -cells; dy <= cells; ++dy)
+                    if (dx || dy)
+                        neighbors.push_back(Veci<Dim>(dx, dy));
+        }
+        dilate(neighbors);
+    }
+
     /// Free unknown voxels
     void freeUnknown()
     {
