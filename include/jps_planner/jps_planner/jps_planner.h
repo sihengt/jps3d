@@ -12,10 +12,18 @@
 class GraphSearch;
 /**
  * @brief Abstract base for planning
+ *
+ * @param Dim is the dimension of the workspace
+ * @param ValueT is the map cell value type, forwarded to JPS::MapUtil<Dim,
+ * ValueT> and JPS::GraphSearch<Dim, ValueT>. Defaults to double so existing
+ * JPSPlanner<Dim> callers keep compiling unchanged.
  */
-template <int Dim> class JPSPlanner
+template <int Dim, typename ValueT = double> class JPSPlanner
 {
 public:
+    using TmapValue = ValueT;
+    using Tmap = std::vector<ValueT>;
+
     /**
      * @brief Simple constructor
      * @param verbose enable debug mode
@@ -25,8 +33,12 @@ public:
     /**
      * @brief map_util_ setter
      */
-    inline void setMapUtil(const std::shared_ptr<JPS::MapUtil<Dim>> &map_util) {map_util_ = map_util; }
-    
+    inline void
+    setMapUtil(const std::shared_ptr<JPS::MapUtil<Dim, ValueT>> &map_util)
+    {
+        map_util_ = map_util;
+    }
+
     /**
      * @brief Status of the planner
      *
@@ -53,7 +65,7 @@ public:
     /// Get all the nodes
     vec_Vecf<Dim> getAllSet() const;
     /// Set thresh_dist_
-    void setThreshDist(JPS::TmapValue val)
+    void setThreshDist(TmapValue val)
     {
         thresh_dist_ = val;
         if (graph_search_)
@@ -62,10 +74,10 @@ public:
 
 protected:
     /// Assume using 3D voxel map for all 2d and 3d planning
-    std::shared_ptr<JPS::MapUtil<Dim>> map_util_;
+    std::shared_ptr<JPS::MapUtil<Dim, ValueT>> map_util_;
     /// The planner -- persists across plan() calls; only rebuilt if the map
     /// dimensions change. See plan() in jps_planner.cpp.
-    std::shared_ptr<JPS::GraphSearch<Dim>> graph_search_;
+    std::shared_ptr<JPS::GraphSearch<Dim, ValueT>> graph_search_;
     /// Dimensions graph_search_ was last built for (-1 = not built yet)
     int graph_search_dim_x_ = -1;
     int graph_search_dim_y_ = -1;
@@ -79,10 +91,10 @@ protected:
     /// Enabled for printing info
     bool planner_verbose_;
     /// 1-D map array
-    JPS::Tmap cmap_;
+    Tmap cmap_;
     /// TODO: to refactor
     /// Distance >= thresh_dist_ are considered free
-    JPS::TmapValue thresh_dist_ = 0;
+    TmapValue thresh_dist_ = 0;
 };
 
 /// Planner for 2D OccMap

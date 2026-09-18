@@ -172,10 +172,18 @@ private:
  * @brief GraphSearch class
  *
  * Implement A* and Jump Point Search
+ *
+ * @param Dim is the dimension of the workspace
+ * @param ValueT is the map cell value type, forwarded to MapUtil<Dim,
+ * ValueT>. Defaults to double so existing GraphSearch<Dim> callers keep
+ * compiling unchanged.
  */
-template <int Dim> class GraphSearch
+template <int Dim, typename ValueT = double> class GraphSearch
 {
 public:
+    using TmapValue = ValueT;
+    using Tmap = std::vector<ValueT>;
+
     /**
      * @brief 2D graph search constructor
      *
@@ -185,7 +193,7 @@ public:
      * @param eps weight of heuristic, optional, default as 1
      * @param verbose flag for printing debug info, optional, default as false
      */
-    GraphSearch(const std::shared_ptr<MapUtil<Dim>> &map_util, int xDim,
+    GraphSearch(const std::shared_ptr<MapUtil<Dim, ValueT>> &map_util, int xDim,
                 int yDim, double eps = 1, bool verbose = false);
     /**
      * @brief 3D graph search constructor
@@ -197,7 +205,7 @@ public:
      * @param eps weight of heuristic, optional, default as 1
      * @param verbose flag for printing debug info, optional, default as False
      */
-    GraphSearch(const std::shared_ptr<MapUtil<Dim>> &map_util, int xDim,
+    GraphSearch(const std::shared_ptr<MapUtil<Dim, ValueT>> &map_util, int xDim,
                 int yDim, int zDim, double eps = 1, bool verbose = false);
 
     /// TODO: to refactor
@@ -314,7 +322,7 @@ private:
     /// Initialize 2D jps arrays
     void init2DJps();
 
-    std::shared_ptr<MapUtil<Dim>> map_util_;
+    std::shared_ptr<MapUtil<Dim, ValueT>> map_util_;
     std::shared_ptr<const Tmap> cMap_;
     int xDim_, yDim_, zDim_;
     TmapValue thresh_dist_ = 0;

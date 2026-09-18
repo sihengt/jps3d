@@ -1,32 +1,32 @@
 #include "../../test/timer.hpp"
 #include <jps_planner/jps_planner/jps_planner.h>
 
-template <int Dim>
-JPSPlanner<Dim>::JPSPlanner(bool verbose) : planner_verbose_(verbose)
+template <int Dim, typename ValueT>
+JPSPlanner<Dim, ValueT>::JPSPlanner(bool verbose) : planner_verbose_(verbose)
 {
     planner_verbose_ = verbose;
     if (planner_verbose_)
         printf(ANSI_COLOR_CYAN "JPS PLANNER VERBOSE ON\n" ANSI_COLOR_RESET);
 }
 
-template <int Dim>
-void JPSPlanner<Dim>::setMapUtil(
-    const std::shared_ptr<JPS::MapUtil<Dim>> &map_util)
+template <int Dim, typename ValueT>
+void JPSPlanner<Dim, ValueT>::setMapUtil(
+    const std::shared_ptr<JPS::MapUtil<Dim, ValueT>> &map_util)
 {
     map_util_ = map_util;
 }
 
-template <int Dim> int JPSPlanner<Dim>::status() { return status_; }
+template <int Dim, typename ValueT> int JPSPlanner<Dim, ValueT>::status() { return status_; }
 
-template <int Dim> vec_Vecf<Dim> JPSPlanner<Dim>::getPath() { return path_; }
+template <int Dim, typename ValueT> vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getPath() { return path_; }
 
-template <int Dim> vec_Vecf<Dim> JPSPlanner<Dim>::getRawPath()
+template <int Dim, typename ValueT> vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getRawPath()
 {
     return raw_path_;
 }
 
-template <int Dim>
-vec_Vecf<Dim> JPSPlanner<Dim>::removeCornerPts(const vec_Vecf<Dim> &path)
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::removeCornerPts(const vec_Vecf<Dim> &path)
 {
     if (path.size() < 2)
         return path;
@@ -72,8 +72,8 @@ vec_Vecf<Dim> JPSPlanner<Dim>::removeCornerPts(const vec_Vecf<Dim> &path)
     return optimized_path;
 }
 
-template <int Dim>
-vec_Vecf<Dim> JPSPlanner<Dim>::removeLinePts(const vec_Vecf<Dim> &path)
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::removeLinePts(const vec_Vecf<Dim> &path)
 {
     if (path.size() < 3)
         return path;
@@ -98,7 +98,7 @@ vec_Vecf<Dim> JPSPlanner<Dim>::removeLinePts(const vec_Vecf<Dim> &path)
     return new_path;
 }
 
-template <int Dim> vec_Vecf<Dim> JPSPlanner<Dim>::getOpenSet() const
+template <int Dim, typename ValueT> vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getOpenSet() const
 {
     vec_Vecf<Dim> ps;
     const auto ss = graph_search_->getOpenSet();
@@ -116,7 +116,7 @@ template <int Dim> vec_Vecf<Dim> JPSPlanner<Dim>::getOpenSet() const
     return ps;
 }
 
-template <int Dim> vec_Vecf<Dim> JPSPlanner<Dim>::getCloseSet() const
+template <int Dim, typename ValueT> vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getCloseSet() const
 {
     vec_Vecf<Dim> ps;
     const auto ss = graph_search_->getCloseSet();
@@ -134,7 +134,7 @@ template <int Dim> vec_Vecf<Dim> JPSPlanner<Dim>::getCloseSet() const
     return ps;
 }
 
-template <int Dim> vec_Vecf<Dim> JPSPlanner<Dim>::getAllSet() const
+template <int Dim, typename ValueT> vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getAllSet() const
 {
     vec_Vecf<Dim> ps;
     const auto ss = graph_search_->getAllSet();
@@ -152,8 +152,8 @@ template <int Dim> vec_Vecf<Dim> JPSPlanner<Dim>::getAllSet() const
     return ps;
 }
 
-template <int Dim>
-bool JPSPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
+template <int Dim, typename ValueT>
+bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
                            decimal_t eps, bool use_jps)
 {
     if (!map_util_)
@@ -297,6 +297,6 @@ bool JPSPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
     return true;
 }
 
-template class JPSPlanner<2>;
+template class JPSPlanner<2, double>;
 
-template class JPSPlanner<3>;
+template class JPSPlanner<3, double>;
