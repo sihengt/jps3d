@@ -63,7 +63,7 @@ public:
 protected:
     /// Assume using 3D voxel map for all 2d and 3d planning
     std::shared_ptr<JPS::MapUtil<Dim>> map_util_;
-    /// The planner -- persists across plan() calls; only rebuilt if the map
+    /// The planner - persists across plan() calls; only rebuilt if the map
     /// dimensions change. See plan() in jps_planner.cpp.
     std::shared_ptr<JPS::GraphSearch<Dim>> graph_search_;
     /// Dimensions graph_search_ was last built for (-1 = not built yet)

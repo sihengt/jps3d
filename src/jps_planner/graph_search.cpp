@@ -147,6 +147,12 @@ inline bool GraphSearch<Dim>::isOccupied(int x, int y, int z) const
     }
 }
 
+/**
+ * @brief 2D getHeur is octile distance. (todo: make this hot-swappable with other heuristics)
+ * Octile distance is more represenative when diagonal movements are allowed, (is admissible, tighter than Euclidean).
+ * 
+ * @return double unweighted octile distance
+ */
 template <int Dim> inline double GraphSearch<Dim>::getHeur(int x, int y) const
 {
     // Raw (unweighted) heuristic — eps_ weighting is applied in
@@ -156,6 +162,11 @@ template <int Dim> inline double GraphSearch<Dim>::getHeur(int x, int y) const
     return dx + dy + (SQRT2 - 2.0) * std::min(dx, dy);
 }
 
+/**
+ * @brief 3D getHeur is diagonal distance.
+ * 
+ * @return double unweighted diagonal distance
+ */
 template <int Dim>
 inline double GraphSearch<Dim>::getHeur(int x, int y, int z) const
 {
@@ -204,6 +215,18 @@ bool GraphSearch<Dim>::plan(int xStart, int yStart, int xGoal, int yGoal,
     return plan(currNode_ptr, maxExpand, start_id, goal_id);
 }
 
+/**
+ * @brief Sets up optimizations required for lazy planning across planning cycles:
+ * 1) planning_token_
+ * 2) block_idx_
+ * 3) slot_idx_
+ * 
+ * Creates a currNode_ptr corresponding to the starting node, sets up start/goal_ids, and
+ * sends it off to overloaded plan() that runs core logic.
+ * 
+ * @return true 
+ * @return false 
+ */
 template <int Dim>
 bool GraphSearch<Dim>::plan(int xStart, int yStart, int zStart, int xGoal,
                             int yGoal, int zGoal, bool useJps, int maxExpand)
@@ -212,6 +235,7 @@ bool GraphSearch<Dim>::plan(int xStart, int yStart, int zStart, int xGoal,
     pq_.clear();
     path_.clear();
 
+    // Planning tokens allow for lazy clearing of the visited_ vector.
     current_planning_token_++;
     if (current_planning_token_ == 0) // wrapped after 65535 plans
     {
@@ -239,6 +263,7 @@ bool GraphSearch<Dim>::plan(int xStart, int yStart, int zStart, int xGoal,
 
     return plan(currNode_ptr, maxExpand, start_id, goal_id);
 }
+
 
 template <int Dim>
 bool GraphSearch<Dim>::plan(StatePtr &currNode_ptr, int maxExpand, int start_id,
@@ -304,19 +329,28 @@ bool GraphSearch<Dim>::plan(StatePtr &currNode_ptr, int maxExpand, int start_id,
                 {
                     pq_.increase(child_ptr->heapkey); // update heap
 
-                    if (!use_jps_)
-                    {
-                        child_ptr->dx = (child_ptr->x - currNode_ptr->x);
-                        child_ptr->dy = (child_ptr->y - currNode_ptr->y);
-                        if (!use_2d_)
-                            child_ptr->dz = (child_ptr->z - currNode_ptr->z);
-                        if (child_ptr->dx != 0)
-                            child_ptr->dx /= std::abs(child_ptr->dx);
-                        if (child_ptr->dy != 0)
-                            child_ptr->dy /= std::abs(child_ptr->dy);
-                        if (!use_2d_ && child_ptr->dz != 0)
-                            child_ptr->dz /= std::abs(child_ptr->dz);
-                    }
+                    // Recompute travel direction from the new (cheaper)
+                    // parent, for both A* and JPS. A JPS jump always travels
+                    // in a straight line, so sign(child - parent) exactly
+                    // reconstructs that jump's unit direction -- there's no
+                    // precision lost by taking the sign. This must run
+                    // unconditionally: parentId above was just reassigned to
+                    // currNode_ptr, and dx/dy/dz (used to index the jn2d_/
+                    // jn3d_ pruning tables on this node's *next* expansion)
+                    // has to reflect that same, current-best parent. Freezing
+                    // it at the node's first-discovery direction leaves it
+                    // inconsistent with parentId once a cheaper, differently
+                    // -directed parent is found later.
+                    child_ptr->dx = (child_ptr->x - currNode_ptr->x);
+                    child_ptr->dy = (child_ptr->y - currNode_ptr->y);
+                    if (!use_2d_)
+                        child_ptr->dz = (child_ptr->z - currNode_ptr->z);
+                    if (child_ptr->dx != 0)
+                        child_ptr->dx /= std::abs(child_ptr->dx);
+                    if (child_ptr->dy != 0)
+                        child_ptr->dy /= std::abs(child_ptr->dy);
+                    if (!use_2d_ && child_ptr->dz != 0)
+                        child_ptr->dz /= std::abs(child_ptr->dz);
                 }
                 // if currently in CLOSED
                 else if (child_ptr->opened && child_ptr->closed)
@@ -445,11 +479,14 @@ void GraphSearch<Dim>::getJpsSucc(const StatePtr &curr,
 
     if (use_2d_)
     {
+        // From previous direction of travel (dx/dy), get if it was cardinal / diagonal
         const int norm1 = std::abs(curr->dx) + std::abs(curr->dy);
+        // neib = natural neighbors, fneib = forced neighbors
         int num_neib = jn2d_->nsz[norm1][0];
         int num_fneib = jn2d_->nsz[norm1][1];
         int id = (curr->dx + 1) + 3 * (curr->dy + 1);
 
+        // Optimization: retrieve pointers so they aren't re-fetched each iteration
         const int *ns_dx = jn2d_->ns[id][0];
         const int *ns_dy = jn2d_->ns[id][1];
         const int *f1_dx = jn2d_->f1[id][0];
@@ -460,6 +497,7 @@ void GraphSearch<Dim>::getJpsSucc(const StatePtr &curr,
         succ_ids.reserve(num_neib + num_fneib);
         succ_costs.reserve(num_neib + num_fneib);
 
+        // processes both natural and forced neighbors
         for (int dev = 0; dev < num_neib + num_fneib; ++dev)
         {
             int new_x, new_y;
@@ -476,10 +514,13 @@ void GraphSearch<Dim>::getJpsSucc(const StatePtr &curr,
                 const int fi = dev - num_neib;
                 const int nx = curr->x + f1_dx[fi];
                 const int ny = curr->y + f1_dy[fi];
+                // f1_dx/dy indicates an obstacle is present in a cell
+                // f2_dx/dy indicates the forced neighbor that the obstacle creates
                 if (isOccupied(nx, ny))
                 {
                     dx = f2_dx[fi];
                     dy = f2_dy[fi];
+                    // no poi found from the forced point
                     if (!jump(curr->x, curr->y, dx, dy, new_x, new_y))
                         continue;
                 }
@@ -597,45 +638,11 @@ void GraphSearch<Dim>::getJpsSucc(const StatePtr &curr,
 }
 
 template <int Dim>
-inline bool GraphSearch<Dim>::cutsCorner(int x, int y, int dx, int dy)
-{
-    if (dx == 0 || dy == 0)
-        return false;
-    return isOccupied(x + dx, y) && isOccupied(x, y + dy);
-}
-
-template <int Dim>
-inline bool GraphSearch<Dim>::cutsCorner(int x, int y, int z, int dx, int dy,
-                                         int dz)
-{
-    const int norm1 = std::abs(dx) + std::abs(dy) + std::abs(dz);
-    if (norm1 <= 1)
-        return false;
-
-    if (norm1 == 2)
-    {
-        // Two axes active; reuse the 2D rule on the active pair.
-        if (dx == 0)
-            return isOccupied(x, y + dy, z) && isOccupied(x, y, z + dz);
-        if (dy == 0)
-            return isOccupied(x + dx, y, z) && isOccupied(x, y, z + dz);
-        // dz == 0
-        return isOccupied(x + dx, y, z) && isOccupied(x, y + dy, z);
-    }
-
-    // norm1 == 3: body diagonal. Reverting one axis at a time gives the three
-    // face-adjacent bypass cells. The diagonal is only a true squeeze when all
-    // three are blocked (no surrounding free route).
-    return isOccupied(x, y + dy, z + dz) && isOccupied(x + dx, y, z + dz) &&
-           isOccupied(x + dx, y + dy, z);
-}
-
-template <int Dim>
 bool GraphSearch<Dim>::jump(int x, int y, int dx, int dy, int &new_x,
                             int &new_y)
 {
 
-    // Compute once — constant for entire corridor walk
+    // Compute once - constant for entire corridor walk
     const int id = (dx + 1) + 3 * (dy + 1);
     const int norm1 = std::abs(dx) + std::abs(dy);
     const int num_neib = jn2d_->nsz[norm1][0];
@@ -651,23 +658,15 @@ bool GraphSearch<Dim>::jump(int x, int y, int dx, int dy, int &new_x,
         if (!isFree(new_x, new_y))
             return false;
 
-        // No corner cutting: a diagonal step may only be taken if it does
-        // not squeeze diagonally between two blocked cells.
-        if (cutsCorner(x, y, dx, dy))
-            return false;
-
-        // coordToId is not linear in (x,y) — recompute per step rather than
-        // incrementing by a precomputed stride
+        // check if goal is reached
         if (coordToId(new_x, new_y) == goalId_)
             return true;
 
-        // Pass precomputed id — avoids recomputation inside hasForced
+        // passing precomputed id, norm1, as these stay the same regardless
         if (hasForcedWithId(new_x, new_y, id, norm1))
             return true;
 
-        // Sub-direction probes — cardinal moves have num_neib==1 so this
-        // loop runs 0 times; only diagonal moves recurse here.
-        // Max recursion depth: 2 frames (diagonal → cardinal → no sub-calls)
+        // Sub-direction probes - only diagonal moves recurse here.
         for (int k = 0; k < num_neib - 1; ++k)
         {
             int sub_new_x, sub_new_y;
@@ -675,18 +674,34 @@ bool GraphSearch<Dim>::jump(int x, int y, int dx, int dy, int &new_x,
                 return true;
         }
 
-        // Advance — was the tail-recursive call, now just a loop-back
+        // Advance to next if no point of interest found
         x = new_x;
         y = new_y;
     }
 }
 
+/**
+ * @brief Re
+ * 
+ * @tparam Dim 
+ * @param x current x
+ * @param y current y
+ * @param z current z
+ * @param dx dx to travel to this current position
+ * @param dy dy to travel to this current position
+ * @param dz dz to travel to this current position
+ * @param new_x next x following same traj
+ * @param new_y next y following same traj
+ * @param new_z next z following same traj
+ * @return true jump point found
+ * @return false nothing interesting found - dead end
+ */
 template <int Dim>
 bool GraphSearch<Dim>::jump(int x, int y, int z, int dx, int dy, int dz,
                             int &new_x, int &new_y, int &new_z)
 {
 
-    // Compute once — constant for entire corridor walk
+    // Precompute - constant for entire corridor walk
     const int id = (dx + 1) + 3 * (dy + 1) + 9 * (dz + 1);
     const int norm1 = std::abs(dx) + std::abs(dy) + std::abs(dz);
     const int num_neib = jn3d_->nsz[norm1][0];
@@ -694,10 +709,7 @@ bool GraphSearch<Dim>::jump(int x, int y, int z, int dx, int dy, int dz,
     const int *sub_dy = jn3d_->ns[id][1];
     const int *sub_dz = jn3d_->ns[id][2];
 
-    // Iterative corridor walk. Sub-direction probes still recurse below;
-    // recursion depth is bounded because sub-directions always have
-    // strictly lower norm1 (body-diag -> face-diag -> cardinal -> none),
-    // so max live stack depth is 3 frames regardless of grid size.
+    // During corridor walk, looks for a jump point 
     while (true)
     {
         new_x = x + dx;
@@ -707,13 +719,6 @@ bool GraphSearch<Dim>::jump(int x, int y, int z, int dx, int dy, int dz,
         if (!isFree(new_x, new_y, new_z))
             return false;
 
-        // No corner cutting: a diagonal/body-diagonal step may only be taken
-        // if it does not squeeze through blocked bypass cells.
-        if (cutsCorner(x, y, z, dx, dy, dz))
-            return false;
-
-        // coordToId is not linear in (x,y,z) — recompute per step rather
-        // than incrementing by a precomputed stride
         if (coordToId(new_x, new_y, new_z) == goalId_)
             return true;
 
@@ -728,14 +733,14 @@ bool GraphSearch<Dim>::jump(int x, int y, int z, int dx, int dy, int dz,
                 return true;
         }
 
-        // Advance — was the tail-recursive call, now just a loop-back
+        // Advance - was the tail-recursive call, now just a loop-back
         x = new_x;
         y = new_y;
         z = new_z;
     }
 }
 
-// 2D — id and norm1 passed in from jump(), zero recomputation
+// 2D - id and norm1 passed in from jump()
 template <int Dim>
 inline bool GraphSearch<Dim>::hasForcedWithId(int x, int y, int id, int norm1)
 {
@@ -751,16 +756,29 @@ inline bool GraphSearch<Dim>::hasForcedWithId(int x, int y, int id, int norm1)
     return false;
 }
 
-// 3D — id and norm1 passed in from jump(), zero recomputation
+/**
+ * @brief hasForced which uses precomputed id to save computation
+ * 
+ * @tparam Dim 
+ * @param x 
+ * @param y 
+ * @param z 
+ * @param id 
+ * @param norm1 
+ * @return true 
+ * @return false 
+ */
 template <int Dim>
 inline bool GraphSearch<Dim>::hasForcedWithId(int x, int y, int z, int id,
                                               int norm1)
 {
+    // Check number of potential forced neighbors
     const int num_forced = jn3d_->nsz[norm1][1];
     const int *f1x = jn3d_->f1[id][0];
     const int *f1y = jn3d_->f1[id][1];
     const int *f1z = jn3d_->f1[id][2];
 
+    // looks to see if any of the forced neighbor is an obstacle
     for (int fn = 0; fn < num_forced; ++fn)
     {
         if (isOccupied(x + f1x[fn], y + f1y[fn], z + f1z[fn]))

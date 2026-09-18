@@ -9,13 +9,6 @@ JPSPlanner<Dim>::JPSPlanner(bool verbose) : planner_verbose_(verbose)
         printf(ANSI_COLOR_CYAN "JPS PLANNER VERBOSE ON\n" ANSI_COLOR_RESET);
 }
 
-template <int Dim>
-void JPSPlanner<Dim>::setMapUtil(
-    const std::shared_ptr<JPS::MapUtil<Dim>> &map_util)
-{
-    map_util_ = map_util;
-}
-
 template <int Dim> int JPSPlanner<Dim>::status() { return status_; }
 
 template <int Dim> vec_Vecf<Dim> JPSPlanner<Dim>::getPath() { return path_; }
@@ -208,13 +201,15 @@ bool JPSPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
         return false;
     }
 
-    // Reuse the persistent graph_search_ built once in setMapUtil(). It resets
-    // its own per-search state (generation token, pq_, path_, pool indices) at
-    // the top of plan(), so no reallocation is needed here. eps and thresh_dist
-    // are (re)applied per-plan since the object outlives a single search.
+    // Reuse graph_search_ built once in setMapUtil().
+    // Resets per-search state (generation token, pq_, path_, pool indices) at
+    // the top of plan(), so no reallocation is needed here.
+    // eps and thresh_dist are applied per-plan.
     JPS::Timer time_search(true);
     graph_search_->setEps(eps);
     graph_search_->setThreshDist(thresh_dist_);
+
+    // If dimensions have changed between planning cycles, recreate graph_search_
     if (Dim == 3)
         dims_changed = dims_changed || dim(0) != graph_search_dim_x_ ||
                        dim(1) != graph_search_dim_y_ ||
@@ -222,7 +217,6 @@ bool JPSPlanner<Dim>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
     else
         dims_changed = dims_changed || dim(0) != graph_search_dim_x_ ||
                        dim(1) != graph_search_dim_y_;
-
     if (dims_changed)
     {
         if (Dim == 3)

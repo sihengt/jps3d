@@ -16,7 +16,7 @@ namespace JPS
 using TmapValue = signed char;
 using Tmap = std::vector<TmapValue>;
 /**
- * @biref The map util class for collision checking
+ * @brief The map util class for collision checking
  * @param Dim is the dimension of the workspace
  */
 template <int Dim> class MapUtil
