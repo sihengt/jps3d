@@ -16,17 +16,26 @@ void JPSPlanner<Dim, ValueT>::setMapUtil(
     map_util_ = map_util;
 }
 
-template <int Dim, typename ValueT> int JPSPlanner<Dim, ValueT>::status() { return status_; }
+template <int Dim, typename ValueT> int JPSPlanner<Dim, ValueT>::status()
+{
+    return status_;
+}
 
-template <int Dim, typename ValueT> vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getPath() { return path_; }
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getPath()
+{
+    return path_;
+}
 
-template <int Dim, typename ValueT> vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getRawPath()
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getRawPath()
 {
     return raw_path_;
 }
 
 template <int Dim, typename ValueT>
-vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::removeCornerPts(const vec_Vecf<Dim> &path)
+vec_Vecf<Dim>
+JPSPlanner<Dim, ValueT>::removeCornerPts(const vec_Vecf<Dim> &path)
 {
     if (path.size() < 2)
         return path;
@@ -98,7 +107,8 @@ vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::removeLinePts(const vec_Vecf<Dim> &path)
     return new_path;
 }
 
-template <int Dim, typename ValueT> vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getOpenSet() const
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getOpenSet() const
 {
     vec_Vecf<Dim> ps;
     const auto ss = graph_search_->getOpenSet();
@@ -116,7 +126,8 @@ template <int Dim, typename ValueT> vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getOp
     return ps;
 }
 
-template <int Dim, typename ValueT> vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getCloseSet() const
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getCloseSet() const
 {
     vec_Vecf<Dim> ps;
     const auto ss = graph_search_->getCloseSet();
@@ -134,7 +145,8 @@ template <int Dim, typename ValueT> vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getCl
     return ps;
 }
 
-template <int Dim, typename ValueT> vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getAllSet() const
+template <int Dim, typename ValueT>
+vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getAllSet() const
 {
     vec_Vecf<Dim> ps;
     const auto ss = graph_search_->getAllSet();
@@ -153,8 +165,9 @@ template <int Dim, typename ValueT> vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getAl
 }
 
 template <int Dim, typename ValueT>
-bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
-                           decimal_t eps, bool use_jps)
+bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start,
+                                   const Vecf<Dim> &goal, decimal_t eps,
+                                   bool use_jps)
 {
     if (!map_util_)
     {
@@ -181,7 +194,7 @@ bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal
     {
         if (planner_verbose_)
         {
-            if (map_util_->isOccupied(start_int, thresh_dist_))
+            if (map_util_->isOccupied(start_int, thresh_val_))
                 printf(ANSI_COLOR_RED "start is occupied!\n" ANSI_COLOR_RESET);
             else if (map_util_->isUnknown(start_int))
                 printf(ANSI_COLOR_RED "start is unknown!\n" ANSI_COLOR_RESET);
@@ -210,11 +223,11 @@ bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal
 
     // Reuse the persistent graph_search_ built once in setMapUtil(). It resets
     // its own per-search state (generation token, pq_, path_, pool indices) at
-    // the top of plan(), so no reallocation is needed here. eps and thresh_dist
+    // the top of plan(), so no reallocation is needed here. eps and thresh_val
     // are (re)applied per-plan since the object outlives a single search.
     JPS::Timer time_search(true);
     graph_search_->setEps(eps);
-    graph_search_->setThreshDist(thresh_dist_);
+    graph_search_->setThreshVal(thresh_val_);
     if (Dim == 3)
         dims_changed = dims_changed || dim(0) != graph_search_dim_x_ ||
                        dim(1) != graph_search_dim_y_ ||
@@ -244,57 +257,57 @@ bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal
     if (Dim == 3)
         graph_search_->plan(start_int(0), start_int(1), start_int(2),
                             goal_int(0), goal_int(1), goal_int(2), use_jps);
+}
+else
+{
+    graph_search_->plan(start_int(0), start_int(1), goal_int(0), goal_int(1),
+                        use_jps);
+}
+double dt_search = time_search.Elapsed().count();
+if (planner_verbose_)
+{
+    printf("Search takes: %f ms\n", dt_search);
+    fflush(stdout);
+}
+
+const auto path = graph_search_->getPath();
+if (path.size() < 1)
+{
+    if (planner_verbose_)
+        std::cout << ANSI_COLOR_RED "Cannot find a path from "
+                  << start.transpose() << " to " << goal.transpose()
+                  << " Abort!" ANSI_COLOR_RESET << std::endl;
+    status_ = -1;
+    return false;
+}
+
+//**** raw path, s --> g
+vec_Vecf<Dim> ps;
+for (const auto &it : path)
+{
+    if (Dim == 3)
+    {
+        Veci<Dim> pn;
+        pn << it->x, it->y, it->z;
+        ps.push_back(map_util_->intToFloat(pn));
     }
     else
-    {
-        graph_search_->plan(start_int(0), start_int(1), goal_int(0),
-                            goal_int(1), use_jps);
-    }
-    double dt_search = time_search.Elapsed().count();
-    if (planner_verbose_)
-    {
-        printf("Search takes: %f ms\n", dt_search);
-        fflush(stdout);
-    }
+        ps.push_back(map_util_->intToFloat(Veci<Dim>(it->x, it->y)));
+}
 
-    const auto path = graph_search_->getPath();
-    if (path.size() < 1)
-    {
-        if (planner_verbose_)
-            std::cout << ANSI_COLOR_RED "Cannot find a path from "
-                      << start.transpose() << " to " << goal.transpose()
-                      << " Abort!" ANSI_COLOR_RESET << std::endl;
-        status_ = -1;
-        return false;
-    }
+raw_path_ = ps;
+std::reverse(std::begin(raw_path_), std::end(raw_path_));
 
-    //**** raw path, s --> g
-    vec_Vecf<Dim> ps;
-    for (const auto &it : path)
-    {
-        if (Dim == 3)
-        {
-            Veci<Dim> pn;
-            pn << it->x, it->y, it->z;
-            ps.push_back(map_util_->intToFloat(pn));
-        }
-        else
-            ps.push_back(map_util_->intToFloat(Veci<Dim>(it->x, it->y)));
-    }
+// Simplify the raw path
+// path_ = removeLinePts(raw_path_);
+// path_ = removeCornerPts(path_);
+path_ = removeCornerPts(raw_path_);
+std::reverse(std::begin(path_), std::end(path_));
+path_ = removeCornerPts(path_);
+std::reverse(std::begin(path_), std::end(path_));
+path_ = removeLinePts(path_);
 
-    raw_path_ = ps;
-    std::reverse(std::begin(raw_path_), std::end(raw_path_));
-
-    // Simplify the raw path
-    // path_ = removeLinePts(raw_path_);
-    // path_ = removeCornerPts(path_);
-    path_ = removeCornerPts(raw_path_);
-    std::reverse(std::begin(path_), std::end(path_));
-    path_ = removeCornerPts(path_);
-    std::reverse(std::begin(path_), std::end(path_));
-    path_ = removeLinePts(path_);
-
-    return true;
+return true;
 }
 
 template class JPSPlanner<2, double>;

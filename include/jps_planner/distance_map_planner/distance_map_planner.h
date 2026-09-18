@@ -55,9 +55,8 @@ public:
     // TODO: improve the description
     /// Set max potential value
     void setHMax(TmapValue h_max);
-    // TODO: to refactor variable and function name
-    /// Set thresh_dist_
-    void setThreshDist(TmapValue val) { thresh_dist_ = val; }
+    /// Set thresh_val_
+    void setThreshVal(TmapValue val) { thresh_val_ = val; }
 
     /**
      * @brief Status of the planner
@@ -140,8 +139,8 @@ protected:
     int status_ = 0;
     /// max potential value
     TmapValue H_MAX{100};
-    /// Distance >= thresh_dist_ are considered free
-    TmapValue thresh_dist_{0};
+    /// Distance >= thresh_val_ are considered free
+    TmapValue thresh_val_{0};
     /// heuristic weight
     double eps_{0.0};
     /// potential weights

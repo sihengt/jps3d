@@ -64,12 +64,12 @@ public:
     vec_Vecf<Dim> getCloseSet() const;
     /// Get all the nodes
     vec_Vecf<Dim> getAllSet() const;
-    /// Set thresh_dist_
-    void setThreshDist(TmapValue val)
+    /// Set thresh_val_
+    void setThreshVal(TmapValue val)
     {
-        thresh_dist_ = val;
+        thresh_val_ = val;
         if (graph_search_)
-            graph_search_->setThreshDist(val);
+            graph_search_->setThreshVal(val);
     }
 
 protected:
@@ -92,9 +92,8 @@ protected:
     bool planner_verbose_;
     /// 1-D map array
     Tmap cmap_;
-    /// TODO: to refactor
-    /// Distance >= thresh_dist_ are considered free
-    TmapValue thresh_dist_ = 0;
+    /// Distance >= thresh_val_ are considered free
+    TmapValue thresh_val_ = 0;
 };
 
 /// Planner for 2D OccMap

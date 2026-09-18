@@ -116,7 +116,7 @@ public:
     /// Get unknown voxels
     virtual vec_Vecf<Dim> getUnknownCloud() = 0;
 
-    virtual void setThreshDist(decimal_t thresh_dist) = 0;
+    virtual void setThreshVal(decimal_t thresh_val) = 0;
     virtual decimal_t getThreshDist() = 0;
 };
 

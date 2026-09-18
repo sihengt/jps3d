@@ -376,7 +376,7 @@ bool DMPlanner<Dim, ValueT>::checkAvailability(const Veci<Dim> &pn)
         return false;
     }
     int linear_idx = map_util_->getIndex(pn);
-    if (!map_util_->isFree(linear_idx, thresh_dist_))
+    if (!map_util_->isFree(linear_idx, thresh_val_))
     {
         if (planner_verbose_)
             printf(ANSI_COLOR_RED "point is occupied!\n" ANSI_COLOR_RESET);
@@ -633,7 +633,7 @@ bool DMPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start, const Vecf<Dim> &goal,
     const Veci<Dim> dim = map_util_->getDim();
 
     graph_search_ = std::make_shared<DMP::GraphSearch<Dim, ValueT>>(
-        map_util_, eps, cweight, planner_verbose_, thresh_dist_, H_MAX,
+        map_util_, eps, cweight, planner_verbose_, thresh_val_, H_MAX,
         potential_radius_, pow_);
 
     if (Dim == 3)

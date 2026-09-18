@@ -7,13 +7,13 @@ using namespace DMP;
 template <int Dim, typename ValueT>
 GraphSearch<Dim, ValueT>::GraphSearch(
     const std::shared_ptr<JPS::MapUtil<Dim, ValueT>> &map_util, double eps,
-    double cweight, bool verbose, TmapValue thresh_dist, TmapValue h_max,
+    double cweight, bool verbose, TmapValue thresh_val, TmapValue h_max,
     TmapValue potential_radius, int pow)
     : map_util_(map_util),
       // aliasing ctor: cMap_ shares map_util_'s refcount but points at its raw
       // map_ data. The map is used directly as the cost map and is never
       // modified.
-      cMap_(map_util_, &map_util_->map_), thresh_dist_(thresh_dist), eps_(eps),
+      cMap_(map_util_, &map_util_->map_), thresh_val_(thresh_val), eps_(eps),
       cweight_(cweight), H_MAX(h_max), potential_radius_(potential_radius),
       pow_(pow), verbose_(verbose)
 {
@@ -90,7 +90,7 @@ template <int Dim, typename ValueT> inline bool GraphSearch<Dim, ValueT>::isFree
 {
     if constexpr (Dim == 2)
     {
-        return map_util_->isFree(Vec2i(x, y), thresh_dist_);
+        return map_util_->isFree(Vec2i(x, y), thresh_val_);
     }
     else
     {
@@ -104,7 +104,7 @@ inline bool GraphSearch<Dim, ValueT>::isFree(int x, int y, int z) const
 {
     if constexpr (Dim == 3)
     {
-        return map_util_->isFree(Vec3i(x, y, z), thresh_dist_);
+        return map_util_->isFree(Vec3i(x, y, z), thresh_val_);
     }
     else
     {

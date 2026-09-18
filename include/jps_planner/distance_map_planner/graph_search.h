@@ -89,7 +89,7 @@ public:
      * @param eps weight of heuristic, optional, default as 1
      * @param cweight weight of distance cost, optional, default as 0.1
      * @param verbose flag for printing debug info, optional, default as False
-     * @param thresh_dist cells with value >= this are considered free,
+     * @param thresh_val cells with value >= this are considered free,
      * optional, default as 0
      * @param h_max max potential value, optional, default as 100
      * @param potential_radius maximum radius of concern for potential
@@ -98,11 +98,11 @@ public:
      */
     GraphSearch(const std::shared_ptr<JPS::MapUtil<Dim, ValueT>> &map_util,
                 double eps = 1, double cweight = 0.1, bool verbose = false,
-                TmapValue thresh_dist = 0, TmapValue h_max = 100,
+                TmapValue thresh_val = 0, TmapValue h_max = 100,
                 TmapValue potential_radius = 0.5, int pow = 1);
 
-    /// Set thresh_dist_
-    void setThreshDist(TmapValue thresh_dist) { thresh_dist_ = thresh_dist; }
+    /// Set thresh_val_
+    void setThreshVal(TmapValue thresh_val) { thresh_val_ = thresh_val; }
 
     /**
      * @brief start 2D planning thread
@@ -175,8 +175,7 @@ private:
     // Raw cost map, aliased to map_util_->map_ (shared, never modified)
     std::shared_ptr<const Tmap> cMap_;
     int xDim_, yDim_, zDim_;
-    // TODO: to refactor variable name
-    TmapValue thresh_dist_ = 0;
+    TmapValue thresh_val_ = 0;
     /// weight of heuristic
     double eps_;
     /// weight of distance map

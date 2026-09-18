@@ -497,9 +497,9 @@ public:
         return cloud;
     }
 
-    void setThreshDist(decimal_t thresh_dist) override
+    void setThreshVal(decimal_t thresh_val) override
     {
-        thresh_val_ = thresh_dist;
+        thresh_val_ = thresh_val;
     }
 
     decimal_t getThreshDist() override { return thresh_val_; }

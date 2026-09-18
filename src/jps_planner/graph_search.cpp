@@ -98,7 +98,7 @@ inline bool GraphSearch<Dim, ValueT>::isFree(int x, int y) const
         // map_util_->isFree already returns false when outside, so the
         // separate isOutside() call (which recomputes the same index) is
         // redundant — let the coordinate query handle both at once.
-        return map_util_->isFree(Veci<Dim>(x, y), thresh_dist_);
+        return map_util_->isFree(Veci<Dim>(x, y), thresh_val_);
     }
     else
     {
@@ -112,7 +112,7 @@ inline bool GraphSearch<Dim, ValueT>::isFree(int x, int y, int z) const
 {
     if constexpr (Dim == 3)
     {
-        return map_util_->isFree(Veci<Dim>(x, y, z), thresh_dist_);
+        return map_util_->isFree(Veci<Dim>(x, y, z), thresh_val_);
     }
     else
     {
@@ -128,7 +128,7 @@ inline bool GraphSearch<Dim, ValueT>::isOccupied(int x, int y) const
     {
         // isOccupied already treats outside cells as occupied, so the
         // redundant outer isOutside() index recomputation is dropped.
-        return map_util_->isOccupied(Veci<Dim>(x, y), thresh_dist_);
+        return map_util_->isOccupied(Veci<Dim>(x, y), thresh_val_);
     }
     else
     {
@@ -142,7 +142,7 @@ inline bool GraphSearch<Dim, ValueT>::isOccupied(int x, int y, int z) const
 {
     if constexpr (Dim == 3)
     {
-        return map_util_->isOccupied(Veci<Dim>(x, y, z), thresh_dist_);
+        return map_util_->isOccupied(Veci<Dim>(x, y, z), thresh_val_);
     }
     else
     {

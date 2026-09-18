@@ -209,8 +209,8 @@ public:
                 int yDim, int zDim, double eps = 1, bool verbose = false);
 
     /// TODO: to refactor
-    /// Set thresh_dist_
-    void setThreshDist(TmapValue thresh_dist) { thresh_dist_ = thresh_dist; }
+    /// Set thresh_val_
+    void setThreshVal(TmapValue thresh_val) { thresh_val_ = thresh_val; }
 
     /// Set the heuristic weight. The GraphSearch is now built once and
     /// reused across plans (see JPSPlanner::setMapUtil), so eps must be
@@ -325,7 +325,7 @@ private:
     std::shared_ptr<MapUtil<Dim, ValueT>> map_util_;
     std::shared_ptr<const Tmap> cMap_;
     int xDim_, yDim_, zDim_;
-    TmapValue thresh_dist_ = 0;
+    TmapValue thresh_val_ = 0;
     double eps_;
     bool verbose_;
 
