@@ -3,17 +3,20 @@
 
 using namespace JPS;
 
+namespace
+{
+constexpr double SQRT2 = 1.41421356237309504880;
+constexpr double SQRT3 = 1.73205080756887729353;
+} // namespace
+
 double JPS::g_heur_weight = 1.0;
 
 template <int Dim, typename ValueT>
 GraphSearch<Dim, ValueT>::GraphSearch(
     const std::shared_ptr<MapUtil<Dim, ValueT>> &map_util, int xDim, int yDim,
     double eps, bool verbose)
-    : map_util_(map_util),
-      // aliasing ctor: cMap_ shares map_util_'s refcount but points at its map_
-      // data
-      cMap_(map_util_, &map_util_->map_), xDim_(xDim), yDim_(yDim), eps_(eps),
-      verbose_(verbose)
+    : map_util_(map_util), cMap_(map_util_->getMap()), xDim_(xDim),
+      yDim_(yDim), eps_(eps), verbose_(verbose)
 {
     g_heur_weight = eps_;
     hm_.resize(xDim_ * yDim_, nullptr);
@@ -36,11 +39,8 @@ template <int Dim, typename ValueT>
 GraphSearch<Dim, ValueT>::GraphSearch(
     const std::shared_ptr<MapUtil<Dim, ValueT>> &map_util, int xDim, int yDim,
     int zDim, double eps, bool verbose)
-    : map_util_(map_util),
-      // aliasing ctor: cMap_ shares map_util_'s refcount but points at its map_
-      // data
-      cMap_(map_util_, &map_util_->map_), xDim_(xDim), yDim_(yDim), zDim_(zDim),
-      eps_(eps), verbose_(verbose)
+    : map_util_(map_util), cMap_(map_util_->getMap()), xDim_(xDim),
+      yDim_(yDim), zDim_(zDim), eps_(eps), verbose_(verbose)
 {
     g_heur_weight = eps_;
     hm_.resize(xDim_ * yDim_ * zDim_, nullptr);
@@ -857,7 +857,8 @@ std::vector<StatePtr> GraphSearch<Dim, ValueT>::getOpenSet() const
     return ss;
 }
 
-std::vector<StatePtr> GraphSearch::getCloseSet() const
+template <int Dim, typename ValueT>
+std::vector<StatePtr> GraphSearch<Dim, ValueT>::getCloseSet() const
 {
     std::vector<StatePtr> ss;
     for (size_t i = 0; i < hm_.size(); ++i)
@@ -1759,3 +1760,7 @@ void JPS3DNeib::FNeib(int dx, int dy, int dz, int norm1, int dev, int &fx,
         }
     }
 }
+
+template class JPS::GraphSearch<2, double>;
+
+template class JPS::GraphSearch<3, double>;

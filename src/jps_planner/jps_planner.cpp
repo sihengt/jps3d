@@ -1,4 +1,5 @@
 #include "../../test/timer.hpp"
+#include <iostream>
 #include <jps_planner/jps_planner/jps_planner.h>
 
 template <int Dim, typename ValueT>
@@ -7,13 +8,6 @@ JPSPlanner<Dim, ValueT>::JPSPlanner(bool verbose) : planner_verbose_(verbose)
     planner_verbose_ = verbose;
     if (planner_verbose_)
         printf(ANSI_COLOR_CYAN "JPS PLANNER VERBOSE ON\n" ANSI_COLOR_RESET);
-}
-
-template <int Dim, typename ValueT>
-void JPSPlanner<Dim, ValueT>::setMapUtil(
-    const std::shared_ptr<JPS::MapUtil<Dim, ValueT>> &map_util)
-{
-    map_util_ = map_util;
 }
 
 template <int Dim, typename ValueT> int JPSPlanner<Dim, ValueT>::status()
@@ -31,6 +25,11 @@ template <int Dim, typename ValueT>
 vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getRawPath()
 {
     return raw_path_;
+}
+
+template <int Dim, typename ValueT> void JPSPlanner<Dim, ValueT>::updateMap()
+{
+    cmap_ = map_util_->getMap();
 }
 
 template <int Dim, typename ValueT>
@@ -190,7 +189,7 @@ bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start,
     status_ = 0;
 
     const Veci<Dim> start_int = map_util_->floatToInt(start);
-    if (!map_util_->isFree(start_int))
+    if (!map_util_->isFree(start_int, thresh_val_))
     {
         if (planner_verbose_)
         {
@@ -213,7 +212,7 @@ bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start,
     }
 
     const Veci<Dim> goal_int = map_util_->floatToInt(goal);
-    if (!map_util_->isFree(goal_int))
+    if (!map_util_->isFree(goal_int, thresh_val_))
     {
         if (planner_verbose_)
             printf(ANSI_COLOR_RED "goal is not free!\n" ANSI_COLOR_RESET);
@@ -221,93 +220,89 @@ bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start,
         return false;
     }
 
-    // Reuse the persistent graph_search_ built once in setMapUtil(). It resets
-    // its own per-search state (generation token, pq_, path_, pool indices) at
-    // the top of plan(), so no reallocation is needed here. eps and thresh_val
-    // are (re)applied per-plan since the object outlives a single search.
+    // Reuse the persistent graph_search_ across plan() calls, only rebuilding
+    // it if the map dimensions changed since it was last built.
     JPS::Timer time_search(true);
-    graph_search_->setEps(eps);
-    graph_search_->setThreshVal(thresh_val_);
+
+    const Veci<Dim> dim = map_util_->getDim();
+    bool dims_changed;
     if (Dim == 3)
-        dims_changed = dims_changed || dim(0) != graph_search_dim_x_ ||
+        dims_changed = dim(0) != graph_search_dim_x_ ||
                        dim(1) != graph_search_dim_y_ ||
                        dim(2) != graph_search_dim_z_;
     else
-        dims_changed = dims_changed || dim(0) != graph_search_dim_x_ ||
-                       dim(1) != graph_search_dim_y_;
+        dims_changed =
+            dim(0) != graph_search_dim_x_ || dim(1) != graph_search_dim_y_;
 
-    if (dims_changed)
+    if (!graph_search_ || dims_changed)
     {
         if (Dim == 3)
-            graph_search_ = std::make_shared<JPS::GraphSearch>(
-                cmap_.data(), dim(0), dim(1), dim(2), eps, planner_verbose_);
+            graph_search_ = std::make_shared<JPS::GraphSearch<Dim, ValueT>>(
+                map_util_, dim(0), dim(1), dim(2), eps, planner_verbose_);
         else
-            graph_search_ = std::make_shared<JPS::GraphSearch>(
-                cmap_.data(), dim(0), dim(1), eps, planner_verbose_);
+            graph_search_ = std::make_shared<JPS::GraphSearch<Dim, ValueT>>(
+                map_util_, dim(0), dim(1), eps, planner_verbose_);
         graph_search_dim_x_ = dim(0);
         graph_search_dim_y_ = dim(1);
         if (Dim == 3)
             graph_search_dim_z_ = dim(2);
     }
-    else
-    {
-        graph_search_->setEps(eps);
-    }
+
+    graph_search_->setEps(eps);
+    graph_search_->setThreshVal(thresh_val_);
 
     if (Dim == 3)
         graph_search_->plan(start_int(0), start_int(1), start_int(2),
                             goal_int(0), goal_int(1), goal_int(2), use_jps);
-}
-else
-{
-    graph_search_->plan(start_int(0), start_int(1), goal_int(0), goal_int(1),
-                        use_jps);
-}
-double dt_search = time_search.Elapsed().count();
-if (planner_verbose_)
-{
-    printf("Search takes: %f ms\n", dt_search);
-    fflush(stdout);
-}
-
-const auto path = graph_search_->getPath();
-if (path.size() < 1)
-{
-    if (planner_verbose_)
-        std::cout << ANSI_COLOR_RED "Cannot find a path from "
-                  << start.transpose() << " to " << goal.transpose()
-                  << " Abort!" ANSI_COLOR_RESET << std::endl;
-    status_ = -1;
-    return false;
-}
-
-//**** raw path, s --> g
-vec_Vecf<Dim> ps;
-for (const auto &it : path)
-{
-    if (Dim == 3)
-    {
-        Veci<Dim> pn;
-        pn << it->x, it->y, it->z;
-        ps.push_back(map_util_->intToFloat(pn));
-    }
     else
-        ps.push_back(map_util_->intToFloat(Veci<Dim>(it->x, it->y)));
-}
+        graph_search_->plan(start_int(0), start_int(1), goal_int(0),
+                            goal_int(1), use_jps);
 
-raw_path_ = ps;
-std::reverse(std::begin(raw_path_), std::end(raw_path_));
+    double dt_search = time_search.Elapsed().count();
+    if (planner_verbose_)
+    {
+        printf("Search takes: %f ms\n", dt_search);
+        fflush(stdout);
+    }
 
-// Simplify the raw path
-// path_ = removeLinePts(raw_path_);
-// path_ = removeCornerPts(path_);
-path_ = removeCornerPts(raw_path_);
-std::reverse(std::begin(path_), std::end(path_));
-path_ = removeCornerPts(path_);
-std::reverse(std::begin(path_), std::end(path_));
-path_ = removeLinePts(path_);
+    const auto path = graph_search_->getPath();
+    if (path.size() < 1)
+    {
+        if (planner_verbose_)
+            std::cout << ANSI_COLOR_RED "Cannot find a path from "
+                      << start.transpose() << " to " << goal.transpose()
+                      << " Abort!" ANSI_COLOR_RESET << std::endl;
+        status_ = -1;
+        return false;
+    }
 
-return true;
+    //**** raw path, s --> g
+    vec_Vecf<Dim> ps;
+    for (const auto &it : path)
+    {
+        if (Dim == 3)
+        {
+            Veci<Dim> pn;
+            pn << it->x, it->y, it->z;
+            ps.push_back(map_util_->intToFloat(pn));
+        }
+        else
+            ps.push_back(map_util_->intToFloat(Veci<Dim>(it->x, it->y)));
+    }
+
+    raw_path_ = ps;
+    std::reverse(std::begin(raw_path_), std::end(raw_path_));
+
+    // Simplify the raw path
+    // path_ = removeLinePts(raw_path_);
+    // path_ = removeCornerPts(path_);
+    path_ = removeCornerPts(raw_path_);
+    std::reverse(std::begin(path_), std::end(path_));
+    path_ = removeCornerPts(path_);
+    std::reverse(std::begin(path_), std::end(path_));
+    path_ = removeLinePts(path_);
+
+    return true;
 }
 
 template class JPSPlanner<2, double>;

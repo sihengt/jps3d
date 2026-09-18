@@ -58,6 +58,9 @@ public:
     /// Planning function
     bool plan(const Vecf<Dim> &start, const Vecf<Dim> &goal, decimal_t eps = 1,
               bool use_jps = true);
+    /// Refresh cmap_ from map_util_. Must be called after setMapUtil() and
+    /// whenever the underlying map data/dims change.
+    void updateMap();
     /// Get the nodes in open set
     vec_Vecf<Dim> getOpenSet() const;
     /// Get the nodes in close set

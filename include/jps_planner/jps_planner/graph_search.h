@@ -208,7 +208,6 @@ public:
     GraphSearch(const std::shared_ptr<MapUtil<Dim, ValueT>> &map_util, int xDim,
                 int yDim, int zDim, double eps = 1, bool verbose = false);
 
-    /// TODO: to refactor
     /// Set thresh_val_
     void setThreshVal(TmapValue thresh_val) { thresh_val_ = thresh_val; }
 
@@ -323,13 +322,14 @@ private:
     void init2DJps();
 
     std::shared_ptr<MapUtil<Dim, ValueT>> map_util_;
-    std::shared_ptr<const Tmap> cMap_;
+    Tmap cMap_;
     int xDim_, yDim_, zDim_;
     TmapValue thresh_val_ = 0;
     double eps_;
     bool verbose_;
 
     int xGoal_, yGoal_, zGoal_;
+    int goalId_;
     bool use_2d_;
     bool use_jps_ = false;
 
