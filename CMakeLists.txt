@@ -78,6 +78,10 @@ target_include_directories(test_map_util_octo PRIVATE ${OCTOMAP_INCLUDE_DIRS})
 target_link_libraries(test_map_util_octo jps_lib ${OCTOMAP_LIBRARIES})
 add_test(test_map_util_octo test_map_util_octo)
 
+add_executable(test_jps3d_frontend test/test_jps3d_frontend.cpp src/jps3d_frontend.cpp)
+target_link_libraries(test_jps3d_frontend jps_lib)
+add_test(test_jps3d_frontend test_jps3d_frontend)
+
 add_executable(test_planner_ceiling test/test_planner_ceiling.cpp)
 target_link_libraries(test_planner_ceiling jps_lib ${YAMLCPP_LIBRARIES})
 add_test(test_planner_ceiling test_planner_ceiling ${CMAKE_SOURCE_DIR}/data/simple3d.yaml)
