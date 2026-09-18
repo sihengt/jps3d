@@ -57,6 +57,11 @@ target_link_libraries(jps3d_node jps_lib ${OCTOMAP_LIBRARIES})
 ament_target_dependencies(jps3d_node
   rclcpp nav_msgs geometry_msgs visualization_msgs std_msgs octomap_msgs)
 
+add_executable(octomap_test_publisher test/octomap_test_publisher.cpp)
+target_include_directories(octomap_test_publisher PUBLIC ${OCTOMAP_INCLUDE_DIRS})
+target_link_libraries(octomap_test_publisher ${OCTOMAP_LIBRARIES})
+ament_target_dependencies(octomap_test_publisher rclcpp octomap_msgs)
+
 include(CTest)
 
 add_executable(test_planner_2d test/test_planner_2d.cpp)
