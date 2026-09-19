@@ -58,8 +58,9 @@ public:
     /// Planning function
     bool plan(const Vecf<Dim> &start, const Vecf<Dim> &goal, decimal_t eps = 1,
               bool use_jps = true);
-    /// Refresh cmap_ from map_util_. Must be called after setMapUtil() and
-    /// whenever the underlying map data/dims change.
+    /// Refresh the planner's view of the map. Must be called after
+    /// setMapUtil(), setThreshVal() and whenever the map data/dims change.
+    /// A no-op unless fast mode is on (then it rebuilds the snapshot).
     void updateMap();
     /// Get the nodes in open set
     vec_Vecf<Dim> getOpenSet() const;
@@ -67,6 +68,42 @@ public:
     vec_Vecf<Dim> getCloseSet() const;
     /// Get all the nodes
     vec_Vecf<Dim> getAllSet() const;
+    /// Phase timings (ms) and search size of the last plan() call.
+    struct Timings
+    {
+        double check_ms = 0;   ///< start/goal validation
+        double build_ms = 0;   ///< GraphSearch (re)construction, 0 if reused
+        double search_ms = 0;  ///< graph search
+        double convert_ms = 0; ///< StatePtr path -> world coordinates
+        double corner_ms = 0;  ///< removeCornerPts (both passes)
+        double line_ms = 0;    ///< removeLinePts
+        double total_ms = 0;
+        long long expand = 0, succ = 0, jump_steps = 0, cell_queries = 0,
+                  heap_push = 0; ///< from GraphSearch::Stats (JPS_PROFILE)
+    };
+    const Timings &lastTimings() const { return timings_; }
+
+    /// Cap on graph-search expansions per plan(); <= 0 means unlimited.
+    /// When the cap is hit, plan() returns true with status() == 3 and
+    /// getPath()/getRawPath() hold a partial path toward the goal.
+    void setMaxExpand(int n) { max_expand_ = n; }
+
+    /// Fast mode: updateMap() takes a flat occupancy snapshot of the map's
+    /// live region (MapUtil::snapshotOccupancy) and plan() searches that
+    /// array directly instead of calling MapUtil per cell. updateMap() must
+    /// be called after every map change and after setThreshVal().
+    void setFastMode(bool on) { fast_mode_ = on; }
+    bool fastMode() const { return fast_mode_; }
+    /// Time spent building the last snapshot (ms).
+    double lastSnapshotMs() const { return snapshot_ms_; }
+
+    /// Restrict plan() to the inclusive cell box [lo, hi] (global cell
+    /// indices, as returned by MapUtil::floatToInt). Fast mode only.
+    /// Returns true if the box covers the whole snapshot, i.e. widening it
+    /// further cannot change the result.
+    bool setSearchBox(const Veci<Dim> &lo, const Veci<Dim> &hi);
+    void clearSearchBox() { box_en_ = false; }
+
     /// Set thresh_val_
     void setThreshVal(TmapValue val)
     {
@@ -93,10 +130,21 @@ protected:
     int status_ = 0;
     /// Enabled for printing info
     bool planner_verbose_;
-    /// 1-D map array
-    Tmap cmap_;
     /// Distance >= thresh_val_ are considered free
     TmapValue thresh_val_ = 0;
+    Timings timings_;
+    int max_expand_ = -1;
+
+    bool fast_mode_ = false;
+    std::vector<uint8_t> occ_;
+    Veci<Dim> snap_lo_ = Veci<Dim>::Zero();
+    Veci<Dim> snap_dim_ = Veci<Dim>::Zero();
+    double snapshot_ms_ = 0;
+    bool box_en_ = false;
+    Veci<Dim> box_lo_ = Veci<Dim>::Zero(), box_hi_ = Veci<Dim>::Zero();
+
+    /// Grid cell -> world, adding the snapshot offset in fast mode
+    Vecf<Dim> cellToWorld(const JPS::StatePtr &it) const;
 };
 
 /// Planner for 2D OccMap

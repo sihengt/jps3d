@@ -9,6 +9,8 @@
 #include <iostream>
 #include <jps_collision/map_util.h>
 #include <rog_map/rog_map.h>
+#include <stdexcept>
+#include <string>
 
 namespace JPS
 {
@@ -39,8 +41,28 @@ public:
         val_unknown_ = std::numeric_limits<double>::max();
         thresh_val_ = 0.0;
 
-        for (int i = 0; i < Dim; ++i)
-            dim_(i) = std::round(map_class_ptr_->getLocalMapSize()(i) / res_);
+        // dim_ must equal the ESDF ring buffer's own grid size, since getIndex()
+        // hashes into that buffer and GraphSearch sizes its node table from
+        // getDim(). ROG-Map's CounterMap pads the ESDF grid beyond
+        // map_size/res (see CounterMap::initCounterMap: half = floor(half_d /
+        // res) + (inflation_step + 1), size = 2*half + 1, with inflation_step
+        // 0 for the ESDF), so replicate that here and cross-check against the
+        // buffer length rather than rounding map_size/res.
+        {
+            const Vecf<Dim> half_d = map_class_ptr_->getLocalMapSize() / 2.0;
+            for (int i = 0; i < Dim; ++i)
+                dim_(i) =
+                    2 * (static_cast<int>(half_d(i) / res_) + 1) + 1;
+            long long prod = 1;
+            for (int i = 0; i < Dim; ++i)
+                prod *= dim_(i);
+            if (prod != static_cast<long long>(map_.size()))
+                throw std::runtime_error(
+                    "ROGMapUtil: derived ESDF dims (" +
+                    std::to_string(prod) +
+                    " cells) do not match ESDF buffer size (" +
+                    std::to_string(map_.size()) + ")");
+        }
 
         // Precompute cell offsets within nearest_free_search_radius_m_, sorted
         // nearest-first, so getNearestKnownFreePos() can scan them directly.
@@ -504,6 +526,65 @@ public:
 
     decimal_t getThreshDist() override { return thresh_val_; }
 
+    /// Direct sweep of the ESDF ring buffer: no virtual calls and no modulo
+    /// in the inner loop (the local index is advanced incrementally along
+    /// x and wrapped once per row). Cells outside the ESDF's updated bbox or
+    /// the virtual floor/ceiling are blocked, exactly as isOutside() does.
+    void snapshotOccupancy(const Veci<Dim> &lo, const Veci<Dim> &hi,
+                           TmapValue val, std::vector<uint8_t> &out) override
+    {
+        if constexpr (Dim != 3)
+        {
+            MapUtil<Dim, ValueT>::snapshotOccupancy(lo, hi, val, out);
+        }
+        else
+        {
+            const Veci<Dim> n = hi - lo + Veci<Dim>::Ones();
+            if ((n.array() <= 0).any())
+            {
+                out.clear();
+                return;
+            }
+            out.assign(static_cast<size_t>(n(0)) * n(1) * n(2), 1);
+            const Vec3i half = (dim_ - Vec3i::Ones()) / 2;
+            // Global index -> local index in [-half, half] (see
+            // rog_map SlidingMap::globalIndexToLocalIndex).
+            auto toLocal = [&](int g, int axis)
+            {
+                int l = g % dim_(axis);
+                if (l > half(axis))
+                    l -= dim_(axis);
+                else if (l < -half(axis))
+                    l += dim_(axis);
+                return l;
+            };
+            const Vec3i vlo = lo.cwiseMax(updated_bbox_min_id_)
+                                  .cwiseMax(Vec3i(lo(0), lo(1), virtual_floor_id_z_));
+            const Vec3i vhi = hi.cwiseMin(updated_bbox_max_id_)
+                                  .cwiseMin(Vec3i(hi(0), hi(1), virtual_ceiling_id_z_));
+            const int sy = dim_(2), sx = dim_(1) * dim_(2);
+            for (int z = vlo(2); z <= vhi(2); ++z)
+            {
+                const int lz = toLocal(z, 2) + half(2);
+                for (int y = vlo(1); y <= vhi(1); ++y)
+                {
+                    const int ly = toLocal(y, 1) + half(1);
+                    int lx = toLocal(vlo(0), 0);
+                    uint8_t *row = out.data() +
+                                   (static_cast<size_t>(z - lo(2)) * n(1) +
+                                    (y - lo(1))) * n(0) + (vlo(0) - lo(0));
+                    for (int x = vlo(0); x <= vhi(0); ++x, ++lx)
+                    {
+                        if (lx > half(0))
+                            lx -= dim_(0);
+                        const int idx = (lx + half(0)) * sx + ly * sy + lz;
+                        row[x - vlo(0)] = (map_[idx] >= val) ? 0 : 1;
+                    }
+                }
+            }
+        }
+    }
+
     /// Map entity (Raw data) -- aliases the live ROGMap ESDF buffer, which is
     /// updated in place as the sliding map moves, so no per-call resync needed.
     const Tmap &map_;
@@ -512,7 +593,7 @@ protected:
     /// Resolution
     decimal_t res_;
     /// Origin, float type
-    Vecf<Dim> origin_d_;
+    Vecf<Dim> origin_d_ = Vecf<Dim>::Zero();
     /// Dimension, int type
     Veci<Dim> dim_;
 

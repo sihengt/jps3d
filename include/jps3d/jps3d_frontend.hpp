@@ -38,12 +38,39 @@ public:
                   bool use_jps, vec_Vec3f &out_path);
 
     /// Last plan()'s status code (0=ok, -1=no path, 1=start blocked,
-    /// 2=goal blocked), for the caller's logging.
+    /// 2=goal blocked, 3=expansion budget hit, partial path returned), for
+    /// the caller's logging.
     int status() const;
+
+    /// Fast mode (flat occupancy snapshot), see JPSPlanner::setFastMode.
+    void setFastMode(bool on);
+    /// Expansion budget per search, see JPSPlanner::setMaxExpand.
+    void setMaxExpand(int n);
+    /// Iterative search-box widening (fast mode only): the first search is
+    /// confined to the start/goal bounding box padded by margin_m metres;
+    /// every exhaustive failure doubles the margin until the box covers the
+    /// whole map (that last attempt equals an unrestricted search, so
+    /// completeness is unchanged). 0 disables.
+    void setSearchBoxWidening(double margin_m);
+    /// Number of searches the last planPath() ran (>1 only with widening).
+    int lastAttempts() const { return last_attempts_; }
+    /// Wall time of the last planPath() summed over all attempts (ms).
+    double lastPlanMs() const { return last_plan_ms_; }
+    /// Time the last updateMap() spent building the fast-mode snapshot.
+    double lastSnapshotMs() const { return planner_->lastSnapshotMs(); }
+
+    /// Phase timings / search counters of the last planPath() call.
+    const JPSPlanner3D::Timings &lastTimings() const
+    {
+        return planner_->lastTimings();
+    }
 
 private:
     std::shared_ptr<JPS::MapUtil<3>> map_util_;
     std::shared_ptr<JPSPlanner3D> planner_;
     bool block_unknown_;
     double frontier_seed_radius_;
+    double widen_margin_m_ = 0.0;
+    int last_attempts_ = 0;
+    double last_plan_ms_ = 0.0;
 };

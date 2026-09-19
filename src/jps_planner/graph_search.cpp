@@ -15,12 +15,13 @@ template <int Dim, typename ValueT>
 GraphSearch<Dim, ValueT>::GraphSearch(
     const std::shared_ptr<MapUtil<Dim, ValueT>> &map_util, int xDim, int yDim,
     double eps, bool verbose)
-    : map_util_(map_util), cMap_(map_util_->getMap()), xDim_(xDim),
-      yDim_(yDim), eps_(eps), verbose_(verbose)
+    : map_util_(map_util), xDim_(xDim), yDim_(yDim), zDim_(1), eps_(eps),
+      verbose_(verbose)
 {
     g_heur_weight = eps_;
     hm_.resize(xDim_ * yDim_, nullptr);
     visited_.resize(xDim_ * yDim_, 0);
+    setSearchBox(Veci<Dim>(), Veci<Dim>(), false);
 
     for (int x = -1; x <= 1; x++)
     {
@@ -39,12 +40,13 @@ template <int Dim, typename ValueT>
 GraphSearch<Dim, ValueT>::GraphSearch(
     const std::shared_ptr<MapUtil<Dim, ValueT>> &map_util, int xDim, int yDim,
     int zDim, double eps, bool verbose)
-    : map_util_(map_util), cMap_(map_util_->getMap()), xDim_(xDim),
-      yDim_(yDim), zDim_(zDim), eps_(eps), verbose_(verbose)
+    : map_util_(map_util), xDim_(xDim), yDim_(yDim), zDim_(zDim), eps_(eps),
+      verbose_(verbose)
 {
     g_heur_weight = eps_;
-    hm_.resize(xDim_ * yDim_ * zDim_, nullptr);
-    visited_.resize(xDim_ * yDim_ * zDim_, 0);
+    hm_.resize(static_cast<size_t>(xDim_) * yDim_ * zDim_, nullptr);
+    visited_.resize(static_cast<size_t>(xDim_) * yDim_ * zDim_, 0);
+    setSearchBox(Veci<Dim>(), Veci<Dim>(), false);
 
     // Set 3D neighbors
     for (int x = -1; x <= 1; x++)
@@ -67,6 +69,8 @@ inline int GraphSearch<Dim, ValueT>::coordToId(int x, int y) const
 {
     if constexpr (Dim == 2)
     {
+        if (flat_)
+            return x + xDim_ * y;
         return map_util_->getIndex(Veci<Dim>(x, y));
     }
     else
@@ -81,6 +85,8 @@ inline int GraphSearch<Dim, ValueT>::coordToId(int x, int y, int z) const
 {
     if constexpr (Dim == 3)
     {
+        if (flat_)
+            return x + xDim_ * (y + yDim_ * z);
         return map_util_->getIndex(Veci<Dim>(x, y, z));
     }
     else
@@ -98,6 +104,10 @@ inline bool GraphSearch<Dim, ValueT>::isFree(int x, int y) const
         // map_util_->isFree already returns false when outside, so the
         // separate isOutside() call (which recomputes the same index) is
         // redundant — let the coordinate query handle both at once.
+        JPS_STAT(stats_.cell_queries++);
+        if (flat_)
+            return x >= bx0_ && x <= bx1_ && y >= by0_ && y <= by1_ &&
+                   flat_[x + xDim_ * y] == 0;
         return map_util_->isFree(Veci<Dim>(x, y), thresh_val_);
     }
     else
@@ -112,6 +122,11 @@ inline bool GraphSearch<Dim, ValueT>::isFree(int x, int y, int z) const
 {
     if constexpr (Dim == 3)
     {
+        JPS_STAT(stats_.cell_queries++);
+        if (flat_)
+            return x >= bx0_ && x <= bx1_ && y >= by0_ && y <= by1_ &&
+                   z >= bz0_ && z <= bz1_ &&
+                   flat_[x + xDim_ * (y + yDim_ * z)] == 0;
         return map_util_->isFree(Veci<Dim>(x, y, z), thresh_val_);
     }
     else
@@ -128,6 +143,10 @@ inline bool GraphSearch<Dim, ValueT>::isOccupied(int x, int y) const
     {
         // isOccupied already treats outside cells as occupied, so the
         // redundant outer isOutside() index recomputation is dropped.
+        JPS_STAT(stats_.cell_queries++);
+        if (flat_)
+            return !(x >= bx0_ && x <= bx1_ && y >= by0_ && y <= by1_ &&
+                     flat_[x + xDim_ * y] == 0);
         return map_util_->isOccupied(Veci<Dim>(x, y), thresh_val_);
     }
     else
@@ -142,6 +161,11 @@ inline bool GraphSearch<Dim, ValueT>::isOccupied(int x, int y, int z) const
 {
     if constexpr (Dim == 3)
     {
+        JPS_STAT(stats_.cell_queries++);
+        if (flat_)
+            return !(x >= bx0_ && x <= bx1_ && y >= by0_ && y <= by1_ &&
+                     z >= bz0_ && z <= bz1_ &&
+                     flat_[x + xDim_ * (y + yDim_ * z)] == 0);
         return map_util_->isOccupied(Veci<Dim>(x, y, z), thresh_val_);
     }
     else
@@ -279,8 +303,12 @@ bool GraphSearch<Dim, ValueT>::plan(StatePtr &currNode_ptr, int maxExpand,
         return false;
     }
 
+    stats_ = Stats();
+    partial_ = false;
+    StatePtr best_h_ptr = currNode_ptr; // lowest-h expanded node, for D
     // Insert start node
     currNode_ptr->heapkey = pq_.push(currNode_ptr);
+    JPS_STAT(stats_.heap_push++);
     currNode_ptr->opened = true;
     hm_[currNode_ptr->id] = currNode_ptr;
     visited_[currNode_ptr->id] = current_planning_token_;
@@ -293,10 +321,13 @@ bool GraphSearch<Dim, ValueT>::plan(StatePtr &currNode_ptr, int maxExpand,
     while (true)
     {
         expand_iteration++;
+        JPS_STAT(stats_.expand++);
         // get element with smallest cost
         currNode_ptr = pq_.top();
         pq_.pop();
         currNode_ptr->closed = true; // Add to closed list
+        if (currNode_ptr->h < best_h_ptr->h)
+            best_h_ptr = currNode_ptr;
 
         if (currNode_ptr->id == goal_id)
         {
@@ -313,8 +344,7 @@ bool GraphSearch<Dim, ValueT>::plan(StatePtr &currNode_ptr, int maxExpand,
         else
             getJpsSucc(currNode_ptr, succ_ids, succ_costs);
 
-        // if(verbose_)
-        // printf("size of succs: %zu\n", succ_ids.size());
+        JPS_STAT(stats_.succ += succ_ids.size());
         // Process successors
         for (int s = 0; s < (int)succ_ids.size(); s++)
         {
@@ -374,6 +404,7 @@ bool GraphSearch<Dim, ValueT>::plan(StatePtr &currNode_ptr, int maxExpand,
                     // child_ptr->y);
                     child_ptr->heapkey = pq_.push(child_ptr);
                     child_ptr->opened = true;
+                    JPS_STAT(stats_.heap_push++);
                 }
             } //
         } // Process successors
@@ -382,6 +413,10 @@ bool GraphSearch<Dim, ValueT>::plan(StatePtr &currNode_ptr, int maxExpand,
         {
             if (verbose_)
                 printf("MaxExpandStep [%d] Reached!!!!!!\n\n", maxExpand);
+            // Budget exhausted: hand back the best partial path so the
+            // caller can keep moving toward the goal while replanning.
+            path_ = recoverPath(best_h_ptr, start_id);
+            partial_ = true;
             return false;
         }
 
@@ -695,6 +730,7 @@ bool GraphSearch<Dim, ValueT>::jump(int x, int y, int dx, int dy, int &new_x,
     {
         new_x = x + dx;
         new_y = y + dy;
+        JPS_STAT(stats_.jump_steps++);
 
         if (!isFree(new_x, new_y))
             return false;
@@ -767,6 +803,7 @@ bool GraphSearch<Dim, ValueT>::jump(int x, int y, int z, int dx, int dy, int dz,
         new_x = x + dx;
         new_y = y + dy;
         new_z = z + dz;
+        JPS_STAT(stats_.jump_steps++);
 
         if (!isFree(new_x, new_y, new_z))
             return false;

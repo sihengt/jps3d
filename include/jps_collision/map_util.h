@@ -5,7 +5,10 @@
 #ifndef JPS_MAP_UTIL_H
 #define JPS_MAP_UTIL_H
 
+#include <algorithm>
+#include <cstdint>
 #include <jps_basis/data_type.h>
+#include <vector>
 
 namespace JPS
 {
@@ -118,6 +121,40 @@ public:
 
     virtual void setThreshVal(decimal_t thresh_val) = 0;
     virtual decimal_t getThreshDist() = 0;
+
+    /// Flat occupancy snapshot of the cell box [lo, hi] (inclusive), for the
+    /// planner's fast path. `out` is resized to prod(hi - lo + 1), indexed
+    /// x-fastest by (pn - lo), and holds 0 for cells that are free at
+    /// threshold `val` and 1 for everything else (occupied, unknown-as-
+    /// occupied if the backend says so, outside the map, above the ceiling).
+    /// The default queries isFree() per cell; backends should override with
+    /// a direct buffer sweep.
+    virtual void snapshotOccupancy(const Veci<Dim> &lo, const Veci<Dim> &hi,
+                                   TmapValue val, std::vector<uint8_t> &out)
+    {
+        const Veci<Dim> n = hi - lo + Veci<Dim>::Ones();
+        size_t total = 1;
+        for (int i = 0; i < Dim; ++i)
+            total *= static_cast<size_t>(std::max(0, n(i)));
+        out.assign(total, 1);
+        if (total == 0)
+            return;
+        if constexpr (Dim == 3)
+        {
+            size_t k = 0;
+            for (int z = 0; z < n(2); ++z)
+                for (int y = 0; y < n(1); ++y)
+                    for (int x = 0; x < n(0); ++x, ++k)
+                        out[k] = isFree(lo + Veci<Dim>(x, y, z), val) ? 0 : 1;
+        }
+        else
+        {
+            size_t k = 0;
+            for (int y = 0; y < n(1); ++y)
+                for (int x = 0; x < n(0); ++x, ++k)
+                    out[k] = isFree(lo + Veci<Dim>(x, y), val) ? 0 : 1;
+        }
+    }
 };
 
 } // namespace JPS

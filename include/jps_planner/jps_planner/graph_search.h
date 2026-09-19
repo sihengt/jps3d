@@ -8,10 +8,20 @@
 
 #include <boost/heap/d_ary_heap.hpp> // boost::heap::d_ary_heap
 #include <jps_collision/map_util.h>
+#include <algorithm>
+#include <cstdint>
 #include <limits>        // std::numeric_limits
 #include <memory>        // std::shared_ptr
 #include <unordered_map> // std::unordered_map
 #include <vector>        // std::vector
+
+// Optional search statistics (expansions, jump steps, map queries...).
+// Compile with -DJPS_PROFILE to enable; otherwise the counters are elided.
+#ifdef JPS_PROFILE
+#define JPS_STAT(expr) (expr)
+#else
+#define JPS_STAT(expr) ((void)0)
+#endif
 
 namespace JPS
 {
@@ -254,6 +264,51 @@ public:
     /// Get the optimal path
     std::vector<StatePtr> getPath() const;
 
+    /// Fast path: search a flat occupancy snapshot instead of calling
+    /// map_util_ per cell. `occ` holds xDim*yDim*zDim bytes, x fastest,
+    /// 1 = blocked. Coordinates passed to plan() are then local to the
+    /// snapshot. nullptr disables (default).
+    void setFlatSnapshot(const uint8_t *occ) { flat_ = occ; }
+
+    /// Restrict the search to the inclusive cell box [lo, hi] (snapshot
+    /// coordinates). Only honoured in flat mode. enable=false restores the
+    /// full snapshot.
+    void setSearchBox(const Veci<Dim> &lo, const Veci<Dim> &hi, bool enable)
+    {
+        if (!enable)
+        {
+            bx0_ = by0_ = bz0_ = 0;
+            bx1_ = xDim_ - 1;
+            by1_ = yDim_ - 1;
+            bz1_ = Dim == 3 ? zDim_ - 1 : 0;
+            return;
+        }
+        bx0_ = std::max(0, lo(0));
+        by0_ = std::max(0, lo(1));
+        bx1_ = std::min(xDim_ - 1, hi(0));
+        by1_ = std::min(yDim_ - 1, hi(1));
+        if constexpr (Dim == 3)
+        {
+            bz0_ = std::max(0, lo(2));
+            bz1_ = std::min(zDim_ - 1, hi(2));
+        }
+    }
+
+    /// True if the last plan() stopped at maxExpand and getPath() holds a
+    /// partial path to the expanded node with the lowest heuristic.
+    bool partial() const { return partial_; }
+
+    /// Per-plan counters, valid after plan() when built with JPS_PROFILE.
+    struct Stats
+    {
+        long long expand = 0;       ///< nodes popped from the open list
+        long long succ = 0;         ///< successors generated
+        long long jump_steps = 0;   ///< cells stepped through by jump()
+        long long cell_queries = 0; ///< isFree/isOccupied map queries
+        long long heap_push = 0;    ///< open-list insertions
+    };
+    const Stats &stats() const { return stats_; }
+
     /// Get the states in open set
     std::vector<StatePtr> getOpenSet() const;
 
@@ -322,7 +377,6 @@ private:
     void init2DJps();
 
     std::shared_ptr<MapUtil<Dim, ValueT>> map_util_;
-    Tmap cMap_;
     int xDim_, yDim_, zDim_;
     TmapValue thresh_val_ = 0;
     double eps_;
@@ -339,6 +393,12 @@ private:
     uint16_t current_planning_token_ = 0;
 
     std::vector<StatePtr> path_;
+    mutable Stats stats_;
+    bool partial_ = false;
+
+    const uint8_t *flat_ = nullptr;
+    int bx0_ = 0, by0_ = 0, bz0_ = 0;
+    int bx1_ = 0, by1_ = 0, bz1_ = 0;
 
     std::vector<std::vector<int>> ns_;
     std::shared_ptr<JPS2DNeib> jn2d_;
