@@ -4,3 +4,6 @@ install/
 log/
 *.svg
 *.pyc
+super_planner/*
+build_rog*/
+build_task*/

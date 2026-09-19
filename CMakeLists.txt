@@ -129,4 +129,42 @@ install(TARGETS jps3d_node
 # )
 # install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
 
+# ---------------------------------------------------------------------------
+# Optional ROG-Map backend (ROGMapUtil in include/jps_collision/map_util_super.h)
+# Requires a built rog_map package on CMAKE_PREFIX_PATH, e.g.
+#   -DJPS3D_WITH_ROG_MAP=ON -DCMAKE_PREFIX_PATH=<ws>/install_local/rog_map
+option(JPS3D_WITH_ROG_MAP "Build ROGMap-backed tests and benchmark" OFF)
+if(JPS3D_WITH_ROG_MAP)
+  # search counters (GraphSearch::Stats) for the benchmark
+  target_compile_definitions(jps_lib PUBLIC JPS_PROFILE)
+  find_package(rog_map REQUIRED)
+  find_package(PCL REQUIRED COMPONENTS common io)
+  find_package(pcl_conversions REQUIRED)
+  find_package(tf2_ros REQUIRED)
+  find_package(tf2_sensor_msgs REQUIRED)
+
+  function(jps3d_rog_target name)
+    add_executable(${name} ${ARGN})
+    target_include_directories(${name} PRIVATE
+      ${rog_map_INCLUDE_DIRS} ${PCL_INCLUDE_DIRS})
+    # rog_map was compiled with ORIGIN_AT_CORNER; its inline index math in
+    # headers must see the same definition.
+    target_compile_definitions(${name} PRIVATE ORIGIN_AT_CORNER JPS_PROFILE
+      ROOT_DIR="${rog_map_DIR}/../../../../../rog_map/")
+    target_link_libraries(${name} jps_lib ${rog_map_LIBRARIES}
+      ${PCL_LIBRARIES} ${YAMLCPP_LIBRARIES})
+    ament_target_dependencies(${name}
+      rclcpp std_msgs nav_msgs geometry_msgs visualization_msgs
+      pcl_conversions tf2_ros tf2_sensor_msgs)
+  endfunction()
+
+  jps3d_rog_target(test_map_util_super test/test_map_util_super.cpp
+    src/jps3d_frontend.cpp)
+  add_test(test_map_util_super test_map_util_super
+    ${CMAKE_SOURCE_DIR}/test/data/rog_map_bench.yaml)
+
+  jps3d_rog_target(bench_jps_rog_map test/bench_jps_rog_map.cpp
+    src/jps3d_frontend.cpp)
+endif()
+
 ament_package()
