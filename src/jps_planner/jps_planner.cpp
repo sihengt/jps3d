@@ -253,6 +253,7 @@ bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start,
         return false;
     }
 
+    // Early exits if the goal index is not free
     const Veci<Dim> goal_int = map_util_->floatToInt(goal);
     if (!map_util_->isFree(goal_int, thresh_val_))
     {

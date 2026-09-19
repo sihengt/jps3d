@@ -680,40 +680,6 @@ void GraphSearch<Dim, ValueT>::getJpsSucc(const StatePtr &curr,
 }
 
 template <int Dim, typename ValueT>
-inline bool GraphSearch<Dim, ValueT>::cutsCorner(int x, int y, int dx, int dy)
-{
-    if (dx == 0 || dy == 0)
-        return false;
-    return isOccupied(x + dx, y) && isOccupied(x, y + dy);
-}
-
-template <int Dim, typename ValueT>
-inline bool GraphSearch<Dim, ValueT>::cutsCorner(int x, int y, int z, int dx,
-                                                 int dy, int dz)
-{
-    const int norm1 = std::abs(dx) + std::abs(dy) + std::abs(dz);
-    if (norm1 <= 1)
-        return false;
-
-    if (norm1 == 2)
-    {
-        // Two axes active; reuse the 2D rule on the active pair.
-        if (dx == 0)
-            return isOccupied(x, y + dy, z) && isOccupied(x, y, z + dz);
-        if (dy == 0)
-            return isOccupied(x + dx, y, z) && isOccupied(x, y, z + dz);
-        // dz == 0
-        return isOccupied(x + dx, y, z) && isOccupied(x, y + dy, z);
-    }
-
-    // norm1 == 3: body diagonal. Reverting one axis at a time gives the three
-    // face-adjacent bypass cells. The diagonal is only a true squeeze when all
-    // three are blocked (no surrounding free route).
-    return isOccupied(x, y + dy, z + dz) && isOccupied(x + dx, y, z + dz) &&
-           isOccupied(x + dx, y + dy, z);
-}
-
-template <int Dim, typename ValueT>
 bool GraphSearch<Dim, ValueT>::jump(int x, int y, int dx, int dy, int &new_x,
                                     int &new_y)
 {
@@ -733,11 +699,6 @@ bool GraphSearch<Dim, ValueT>::jump(int x, int y, int dx, int dy, int &new_x,
         JPS_STAT(stats_.jump_steps++);
 
         if (!isFree(new_x, new_y))
-            return false;
-
-        // No corner cutting: a diagonal step may only be taken if it does
-        // not squeeze diagonally between two blocked cells.
-        if (cutsCorner(x, y, dx, dy))
             return false;
 
         // coordToId is not linear in (x,y) — recompute per step rather than
@@ -806,11 +767,6 @@ bool GraphSearch<Dim, ValueT>::jump(int x, int y, int z, int dx, int dy, int dz,
         JPS_STAT(stats_.jump_steps++);
 
         if (!isFree(new_x, new_y, new_z))
-            return false;
-
-        // No corner cutting: a diagonal/body-diagonal step may only be taken
-        // if it does not squeeze through blocked bypass cells.
-        if (cutsCorner(x, y, z, dx, dy, dz))
             return false;
 
         // coordToId is not linear in (x,y,z) — recompute per step rather

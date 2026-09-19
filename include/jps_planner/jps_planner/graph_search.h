@@ -91,26 +91,20 @@ struct State
     /// if has been closed
     bool closed = false;
 
+    // Needed so state_pool_'s StateBlock can default-construct a vector<State>
+    // slot; allocateState() overwrites the slot via placement assignment.
     State() = default;
 
     /// 2D constructor
     State(int id, int x, int y, int dx, int dy)
         : id(id), x(x), y(y), dx(dx), dy(dy)
     {
-        parentId = -1;
-        g = std::numeric_limits<double>::infinity();
-        opened = false;
-        closed = false;
     }
 
     /// 3D constructor
     State(int id, int x, int y, int z, int dx, int dy, int dz)
         : id(id), x(x), y(y), z(z), dx(dx), dy(dy), dz(dz)
     {
-        parentId = -1;
-        g = std::numeric_limits<double>::infinity();
-        opened = false;
-        closed = false;
     }
 };
 
@@ -361,11 +355,6 @@ private:
     bool hasForcedWithId(int x, int y, int id, int norm1);
     /// Same as hasForced, but takes the id/norm1 already computed by jump()
     bool hasForcedWithId(int x, int y, int z, int id, int norm1);
-
-    /// 2D no-corner-cut test for a diagonal step (dx, dy) from (x, y)
-    bool cutsCorner(int x, int y, int dx, int dy);
-    /// 3D no-corner-cut test for a diagonal step (dx, dy, dz) from (x, y, z)
-    bool cutsCorner(int x, int y, int z, int dx, int dy, int dz);
 
     /// 2D jump, return true iff finding the goal or a jump point
     bool jump(int x, int y, int dx, int dy, int &new_x, int &new_y);
