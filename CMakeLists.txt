@@ -36,6 +36,10 @@ include_directories(include ${EIGEN3_INCLUDE_DIRS})
 add_library(jps_lib src/jps_planner/graph_search.cpp
   src/jps_planner/jps_planner.cpp)
 target_compile_options(jps_lib PRIVATE -Wno-implicit-fallthrough)
+target_include_directories(jps_lib PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
 
 # TODO: dmp_lib (distance_map_planner) is currently broken independent of the
 # standalone-build work here (pre-existing map_util_/TmapValue-vs-Vecf type
@@ -106,13 +110,18 @@ add_test(test_planner_ceiling test_planner_ceiling ${CMAKE_SOURCE_DIR}/data/simp
 # install(FILES "${PROJECT_NAME}Config.cmake" "${PROJECT_NAME}ConfigVersion.cmake"
 #   DESTINATION "share/${PROJECT_NAME}/cmake")
 
-# install(TARGETS jps_lib dmp_lib
-#   RUNTIME DESTINATION bin
-#   LIBRARY DESTINATION lib
-#   ARCHIVE DESTINATION lib)
+install(TARGETS jps_lib
+  EXPORT export_jps3d
+  RUNTIME DESTINATION bin
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib)
 
-# install(DIRECTORY include/jps_basis include/jps_planner include/jps_collision
-#   DESTINATION include)
+install(DIRECTORY include/jps_basis include/jps_planner include/jps_collision
+  DESTINATION include)
+
+ament_export_include_directories(include)
+ament_export_targets(export_jps3d)
+ament_export_dependencies(rog_map)
 
 install(TARGETS jps3d_node
   DESTINATION lib/${PROJECT_NAME})
