@@ -23,6 +23,10 @@ find_package(visualization_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(octomap_msgs REQUIRED)
 find_package(octomap REQUIRED)
+# ROGMapUtil (include/jps_collision/map_util_super.h) is installed for
+# downstream use, so rog_map has to be resolvable for consumers; it is already
+# declared in package.xml and re-exported below.
+find_package(rog_map REQUIRED)
 
 PKG_CHECK_MODULES(YAMLCPP REQUIRED yaml-cpp)
 if(YAMLCPP_FOUND)
@@ -34,7 +38,8 @@ endif()
 include_directories(include ${EIGEN3_INCLUDE_DIRS})
 
 add_library(jps_lib src/jps_planner/graph_search.cpp
-  src/jps_planner/jps_planner.cpp)
+  src/jps_planner/jps_planner.cpp
+  src/jps3d_frontend.cpp)
 target_compile_options(jps_lib PRIVATE -Wno-implicit-fallthrough)
 target_include_directories(jps_lib PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -51,7 +56,7 @@ target_include_directories(jps_lib PUBLIC
 # add_executable(create_map test/create_map.cpp)
 # target_link_libraries(create_map ${YAMLCPP_LIBRARIES})
 
-add_executable(jps3d_node src/jps3d_node.cpp src/jps3d_frontend.cpp)
+add_executable(jps3d_node src/jps3d_node.cpp)
 target_include_directories(jps3d_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
@@ -93,7 +98,7 @@ target_include_directories(test_map_util_octo PRIVATE ${OCTOMAP_INCLUDE_DIRS})
 target_link_libraries(test_map_util_octo jps_lib ${OCTOMAP_LIBRARIES})
 add_test(test_map_util_octo test_map_util_octo)
 
-add_executable(test_jps3d_frontend test/test_jps3d_frontend.cpp src/jps3d_frontend.cpp)
+add_executable(test_jps3d_frontend test/test_jps3d_frontend.cpp)
 target_link_libraries(test_jps3d_frontend jps_lib)
 add_test(test_jps3d_frontend test_jps3d_frontend)
 
@@ -117,6 +122,7 @@ install(TARGETS jps_lib
   ARCHIVE DESTINATION lib)
 
 install(DIRECTORY include/jps_basis include/jps_planner include/jps_collision
+  include/jps3d
   DESTINATION include)
 
 ament_export_include_directories(include)
@@ -146,7 +152,6 @@ option(JPS3D_WITH_ROG_MAP "Build ROGMap-backed tests and benchmark" OFF)
 if(JPS3D_WITH_ROG_MAP)
   # search counters (GraphSearch::Stats) for the benchmark
   target_compile_definitions(jps_lib PUBLIC JPS_PROFILE)
-  find_package(rog_map REQUIRED)
   find_package(PCL REQUIRED COMPONENTS common io)
   find_package(pcl_conversions REQUIRED)
   find_package(tf2_ros REQUIRED)
