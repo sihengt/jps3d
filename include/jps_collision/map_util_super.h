@@ -22,7 +22,7 @@ namespace JPS
  * MapUtil<Dim, ValueT>. Defaults to double.
  */
 template <int Dim, typename ValueT = double>
-class ROGMapUtil : public MapUtil<Dim, ValueT>
+class ROGMapUtil final : public MapUtil<Dim, ValueT>
 {
 public:
     using TmapValue = typename MapUtil<Dim, ValueT>::TmapValue;
@@ -41,9 +41,9 @@ public:
         val_unknown_ = std::numeric_limits<double>::max();
         thresh_val_ = 0.0;
 
-        // dim_ must equal the ESDF ring buffer's own grid size, since getIndex()
-        // hashes into that buffer and GraphSearch sizes its node table from
-        // getDim(). ROG-Map's CounterMap pads the ESDF grid beyond
+        // dim_ must equal the ESDF ring buffer's own grid size, since
+        // getIndex() hashes into that buffer and GraphSearch sizes its node
+        // table from getDim(). ROG-Map's CounterMap pads the ESDF grid beyond
         // map_size/res (see CounterMap::initCounterMap: half = floor(half_d /
         // res) + (inflation_step + 1), size = 2*half + 1, with inflation_step
         // 0 for the ESDF), so replicate that here and cross-check against the
@@ -51,15 +51,13 @@ public:
         {
             const Vecf<Dim> half_d = map_class_ptr_->getLocalMapSize() / 2.0;
             for (int i = 0; i < Dim; ++i)
-                dim_(i) =
-                    2 * (static_cast<int>(half_d(i) / res_) + 1) + 1;
+                dim_(i) = 2 * (static_cast<int>(half_d(i) / res_) + 1) + 1;
             long long prod = 1;
             for (int i = 0; i < Dim; ++i)
                 prod *= dim_(i);
             if (prod != static_cast<long long>(map_.size()))
                 throw std::runtime_error(
-                    "ROGMapUtil: derived ESDF dims (" +
-                    std::to_string(prod) +
+                    "ROGMapUtil: derived ESDF dims (" + std::to_string(prod) +
                     " cells) do not match ESDF buffer size (" +
                     std::to_string(map_.size()) + ")");
         }
@@ -558,10 +556,12 @@ public:
                     l += dim_(axis);
                 return l;
             };
-            const Vec3i vlo = lo.cwiseMax(updated_bbox_min_id_)
-                                  .cwiseMax(Vec3i(lo(0), lo(1), virtual_floor_id_z_));
-            const Vec3i vhi = hi.cwiseMin(updated_bbox_max_id_)
-                                  .cwiseMin(Vec3i(hi(0), hi(1), virtual_ceiling_id_z_));
+            const Vec3i vlo =
+                lo.cwiseMax(updated_bbox_min_id_)
+                    .cwiseMax(Vec3i(lo(0), lo(1), virtual_floor_id_z_));
+            const Vec3i vhi =
+                hi.cwiseMin(updated_bbox_max_id_)
+                    .cwiseMin(Vec3i(hi(0), hi(1), virtual_ceiling_id_z_));
             const int sy = dim_(2), sx = dim_(1) * dim_(2);
             for (int z = vlo(2); z <= vhi(2); ++z)
             {
@@ -570,9 +570,11 @@ public:
                 {
                     const int ly = toLocal(y, 1) + half(1);
                     int lx = toLocal(vlo(0), 0);
-                    uint8_t *row = out.data() +
-                                   (static_cast<size_t>(z - lo(2)) * n(1) +
-                                    (y - lo(1))) * n(0) + (vlo(0) - lo(0));
+                    uint8_t *row =
+                        out.data() +
+                        (static_cast<size_t>(z - lo(2)) * n(1) + (y - lo(1))) *
+                            n(0) +
+                        (vlo(0) - lo(0));
                     for (int x = vlo(0); x <= vhi(0); ++x, ++lx)
                     {
                         if (lx > half(0))

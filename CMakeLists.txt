@@ -177,6 +177,10 @@ if(JPS3D_WITH_ROG_MAP)
   add_test(test_map_util_super test_map_util_super
     ${CMAKE_SOURCE_DIR}/test/data/rog_map_bench.yaml)
 
+  jps3d_rog_target(test_planner_3d_rog_map test/test_planner_3d_rog_map.cpp)
+  add_test(test_planner_3d_rog_map test_planner_3d_rog_map
+    ${CMAKE_SOURCE_DIR}/test/data/rog_map_bench_pcd.yaml)
+
   jps3d_rog_target(bench_jps_rog_map test/bench_jps_rog_map.cpp
     src/jps3d_frontend.cpp)
 endif()
