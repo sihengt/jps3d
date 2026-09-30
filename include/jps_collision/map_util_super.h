@@ -524,6 +524,78 @@ public:
 
     decimal_t getThreshDist() override { return thresh_val_; }
 
+    /// Batched neighbor check (see MapUtil::freeNeighbors). When the whole
+    /// 3x3x3 block around pn is inside the ESDF window and between the
+    /// virtual floor/ceiling (almost always), the ring-buffer index is
+    /// computed once for pn and each neighbor's index is built from
+    /// per-axis terms with a compare-based wrap, so there is no modulo and
+    /// no virtual call per neighbor. Offsets must be within [-1, 1];
+    /// anything else falls back to the per-cell path.
+    uint32_t freeNeighbors(const Veci<Dim> &pn, const Veci<Dim> *offs, int n,
+                           TmapValue val, int *ids) override
+    {
+        if constexpr (Dim != 3)
+        {
+            return MapUtil<Dim, ValueT>::freeNeighbors(pn, offs, n, val, ids);
+        }
+        else
+        {
+            const Vec3i one = Vec3i::Ones();
+            if (pn(2) + 1 > virtual_ceiling_id_z_ ||
+                pn(2) - 1 < virtual_floor_id_z_ ||
+                !map_class_ptr_->insideESDFMap(Vec3i(pn - one)) ||
+                !map_class_ptr_->insideESDFMap(Vec3i(pn + one)))
+                return MapUtil<Dim, ValueT>::freeNeighbors(pn, offs, n, val,
+                                                           ids);
+            const Vec3i half = (dim_ - one) / 2;
+            // term[axis][d + 1] = contribution of local index (pn + d) on
+            // that axis to the buffer hash, as in
+            // SlidingMap::getHashIndexFromGlobalIndex.
+            const int stride[3] = {dim_(1) * dim_(2), dim_(2), 1};
+            int term[3][3];
+            for (int a = 0; a < 3; ++a)
+            {
+                int l = pn(a) % dim_(a);
+                if (l > half(a))
+                    l -= dim_(a);
+                else if (l < -half(a))
+                    l += dim_(a);
+                for (int d = -1; d <= 1; ++d)
+                {
+                    int ld = l + d;
+                    if (ld > half(a))
+                        ld -= dim_(a);
+                    else if (ld < -half(a))
+                        ld += dim_(a);
+                    term[a][d + 1] = (ld + half(a)) * stride[a];
+                }
+            }
+            uint32_t mask = 0;
+            for (int k = 0; k < n; ++k)
+            {
+                const Vec3i &o = offs[k];
+                if ((o.array().abs() > 1).any())
+                {
+                    const Vec3i q = pn + o;
+                    if (isFree(q, val))
+                    {
+                        ids[k] = getIndex(q);
+                        mask |= 1u << k;
+                    }
+                    continue;
+                }
+                const int idx =
+                    term[0][o(0) + 1] + term[1][o(1) + 1] + term[2][o(2) + 1];
+                if (map_[idx] >= val)
+                {
+                    ids[k] = idx;
+                    mask |= 1u << k;
+                }
+            }
+            return mask;
+        }
+    }
+
     /// Direct sweep of the ESDF ring buffer: no virtual calls and no modulo
     /// in the inner loop (the local index is advanced incrementally along
     /// x and wrapped once per row). Cells outside the ESDF's updated bbox or

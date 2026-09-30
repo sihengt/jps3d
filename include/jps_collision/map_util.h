@@ -122,6 +122,28 @@ public:
     virtual void setThreshVal(decimal_t thresh_val) = 0;
     virtual decimal_t getThreshDist() = 0;
 
+    /// Batched neighbor check for graph search: tests the n (<= 32) cells
+    /// pn + offs[k]. For each one that is free at threshold `val`, sets bit k
+    /// of the returned mask and writes its getIndex() to ids[k] (ids[k] is
+    /// unspecified otherwise). Equivalent to n isFree()+getIndex() calls;
+    /// backends override it to share the per-center work (one virtual call
+    /// and one index computation per expansion instead of per neighbor).
+    virtual uint32_t freeNeighbors(const Veci<Dim> &pn, const Veci<Dim> *offs,
+                                   int n, TmapValue val, int *ids)
+    {
+        uint32_t mask = 0;
+        for (int k = 0; k < n; ++k)
+        {
+            const Veci<Dim> q = pn + offs[k];
+            if (isFree(q, val))
+            {
+                ids[k] = getIndex(q);
+                mask |= 1u << k;
+            }
+        }
+        return mask;
+    }
+
     /// Flat occupancy snapshot of the cell box [lo, hi] (inclusive), for the
     /// planner's fast path. `out` is resized to prod(hi - lo + 1), indexed
     /// x-fastest by (pn - lo), and holds 0 for cells that are free at

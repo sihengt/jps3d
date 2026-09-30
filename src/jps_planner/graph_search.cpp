@@ -58,6 +58,8 @@ GraphSearch<Dim, ValueT>::GraphSearch(
                 if (x == 0 && y == 0 && z == 0)
                     continue;
                 ns_.push_back(std::vector<int>{x, y, z});
+                if constexpr (Dim == 3)
+                    ns_vec_.push_back(Veci<Dim>(x, y, z));
             }
         }
     }
@@ -481,6 +483,42 @@ void GraphSearch<Dim, ValueT>::getSucc(const StatePtr &curr,
 
             succ_ids.push_back(new_id);
             succ_costs.push_back(std::sqrt(d[0] * d[0] + d[1] * d[1]));
+        }
+    }
+    // Only for the non-fast case, in 3D. Batches and does checks for all 32 neighbors
+    else if (Dim == 3 && !flat_)
+    {
+        // array that stores ids (if free)
+        int ids[32];
+        Veci<Dim> center;
+        if constexpr (Dim == 3)
+            center = Veci<Dim>(curr->x, curr->y, curr->z);
+        const uint32_t mask = map_util_->freeNeighbors(
+            center, ns_vec_.data(), static_cast<int>(ns_vec_.size()),
+            thresh_val_, ids);
+        JPS_STAT(stats_.cell_queries += ns_vec_.size());
+        for (int k = 0; k < static_cast<int>(ns_vec_.size()); ++k)
+        {
+            // cell is not free
+            if (!(mask & (1u << k)))
+                continue;
+            // cell is free
+            const int new_id = ids[k];
+            if (new_id < 0 || new_id >= static_cast<int>(hm_.size()))
+                continue;
+            const auto &d = ns_[k];
+            if (visited_[new_id] != current_planning_token_)
+            {
+                const int new_x = curr->x + d[0];
+                const int new_y = curr->y + d[1];
+                const int new_z = curr->z + d[2];
+                visited_[new_id] = current_planning_token_;
+                hm_[new_id] = allocateState(new_id, new_x, new_y, new_z,
+                                            d[0], d[1], d[2]);
+                hm_[new_id]->h = getHeur(new_x, new_y, new_z);
+            }
+            succ_ids.push_back(new_id);
+            succ_costs.push_back(std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]));
         }
     }
     else

@@ -390,6 +390,8 @@ private:
     int bx1_ = 0, by1_ = 0, bz1_ = 0;
 
     std::vector<std::vector<int>> ns_;
+    /// ns_ as Veci, for MapUtil::freeNeighbors (3D, non-flat A*)
+    std::vector<Veci<Dim>> ns_vec_;
     std::shared_ptr<JPS2DNeib> jn2d_;
     std::shared_ptr<JPS3DNeib> jn3d_;
 
