@@ -46,10 +46,13 @@ template <class T> struct compare_state
         return (h > g) ? (g + h) : ((g + (2.0 * w - 1.0) * h) / w);
     }
 
+    // Compares the cached State::f (= fval(), refreshed by GraphSearch
+    // whenever g changes) so each heap comparison is two loads instead of
+    // two fval() evaluations.
     bool operator()(T a1, T a2) const
     {
-        double f1 = fval(a1);
-        double f2 = fval(a2);
+        double f1 = a1->f;
+        double f2 = a2->f;
         if ((f1 >= f2 - 0.000001) && (f1 <= f2 + 0.000001))
             return a1->g < a2->g; // if equal compare gvals
         return f1 > f2;
@@ -86,6 +89,8 @@ struct State
     double g = std::numeric_limits<double>::infinity();
     /// heuristic cost
     double h;
+    /// cached compare_state::fval(g, h); valid while in the open list
+    double f = std::numeric_limits<double>::infinity();
     /// if has been opened
     bool opened = false;
     /// if has been closed

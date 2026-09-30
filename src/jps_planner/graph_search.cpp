@@ -309,6 +309,7 @@ bool GraphSearch<Dim, ValueT>::plan(StatePtr &currNode_ptr, int maxExpand,
     partial_ = false;
     StatePtr best_h_ptr = currNode_ptr; // lowest-h expanded node, for D
     // Insert start node
+    currNode_ptr->f = compare_state<StatePtr>::fval(currNode_ptr);
     currNode_ptr->heapkey = pq_.push(currNode_ptr);
     JPS_STAT(stats_.heap_push++);
     currNode_ptr->opened = true;
@@ -358,6 +359,7 @@ bool GraphSearch<Dim, ValueT>::plan(StatePtr &currNode_ptr, int maxExpand,
             {
                 child_ptr->parentId = currNode_ptr->id; // Assign new parent
                 child_ptr->g = tentative_gval;          // Update gval
+                child_ptr->f = compare_state<StatePtr>::fval(child_ptr);
 
                 // double fval = child_ptr->g + child_ptr->h;
 
