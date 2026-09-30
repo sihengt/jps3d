@@ -11,9 +11,12 @@
 #include <string>
 
 #include <jps_collision/map_util_super.h>
+#include <pcl/io/pcd_io.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <rog_map/rog_map.h>
+
+#include <stdexcept>
 
 namespace jps_test
 {
@@ -46,6 +49,20 @@ public:
     {
         if (cfg_.esdf_en)
             esdf_map_->updateESDF3D(cfg_.fix_map_origin);
+    }
+
+    /// Slide the ESDF's sliding window and re-center its updated-bbox on
+    /// `odom`, bypassing the `map_sliding/enable` config gate. mapSliding()
+    /// itself has no such gate internally; it's only ROGMap::updateMap()'s
+    /// ROS-driven callers that check the flag before invoking it. Used by
+    /// tests that need to observe what does/doesn't move under a slide.
+    void slideTo(const Vec3f &odom)
+    {
+        if (cfg_.esdf_en)
+        {
+            esdf_map_->mapSliding(odom);
+            esdf_map_->updateESDF3D(odom);
+        }
     }
 
     const rog_map::Config &config() const { return cfg_; }
@@ -179,6 +196,27 @@ inline rog_map::PointCloud deadEndPocket(double depth, double width)
     b.wall(11.5, 8.5, 11.5, 11.5);
     b.finalize();
     return b.cloud;
+}
+
+//todo: why is rog_map::PointCloud xyzi - does i encode some information / affect anything.
+inline rog_map::PointCloud loadPcdScene(const std::string &path)
+{
+    pcl::PointCloud<pcl::PointXYZ> raw;
+    if (pcl::io::loadPCDFile(path, raw) < 0)
+        throw std::runtime_error("loadPcdScene: failed to load " + path);
+    rog_map::PointCloud cloud;
+    cloud.points.resize(raw.points.size());
+    for (size_t i = 0; i < raw.points.size(); ++i)
+    {
+        cloud.points[i].x = raw.points[i].x;
+        cloud.points[i].y = raw.points[i].y;
+        cloud.points[i].z = raw.points[i].z;
+        cloud.points[i].intensity = 100;
+    }
+    cloud.width = cloud.points.size();
+    cloud.height = 1;
+    cloud.is_dense = true;
+    return cloud;
 }
 
 /// Find the nearest cell to `p` (within `radius` m) that the map util reports

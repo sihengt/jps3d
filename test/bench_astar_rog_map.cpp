@@ -27,6 +27,7 @@
 #include <boost/geometry/geometries/polygon.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -91,98 +92,6 @@ std::shared_ptr<VoxelMapUtil> cloneToSimple(ROGMapUtil<3> &rog,
     auto mu = std::make_shared<VoxelMapUtil>();
     mu->setMap(min_id_g.cast<double>() * res, dim, data, res);
     return mu;
-}
-
-// Diagnostic: build the fast-mode snapshot, then re-query every cell in it
-// live (through ROGMapUtil::isFree, the same path base/non-fast mode uses)
-// and compare classifications. If base mode's huge expand/jump_steps blowup
-// (vs fast/cycle mode, same case) came from the live path seeing different
-// occupancy than the snapshot it was built from, this shows exactly where
-// and how many cells disagree.
-void diffOccupancy(std::shared_ptr<ROGMapUtil<3>> mu_rog, double thresh)
-{
-    Jps3dFrontend fe(mu_rog, false, false, 0.0);
-    fe.setThreshVal(thresh);
-    fe.setFastMode(true);
-    fe.updateMap();
-    auto planner = fe.debugPlanner();
-    const auto &occ = planner->debugSnapshot();
-    const Vec3i lo = planner->debugSnapLo();
-    const Vec3i dim = planner->debugSnapDim();
-    printf("# diffOccupancy: snapshot lo=%d %d %d dim=%d %d %d (%lld cells)\n",
-           lo(0), lo(1), lo(2), dim(0), dim(1), dim(2),
-           (long long)dim(0) * dim(1) * dim(2));
-    if ((long long)occ.size() != (long long)dim(0) * dim(1) * dim(2))
-    {
-        printf("# diffOccupancy: ABORT, occ.size()=%zu != dim product\n", occ.size());
-        return;
-    }
-    long long mismatches = 0, checked = 0;
-    int printed = 0;
-    Timer t(true);
-    for (int z = 0; z < dim(2); ++z)
-        for (int y = 0; y < dim(1); ++y)
-            for (int x = 0; x < dim(0); ++x)
-            {
-                const Vec3i g = lo + Vec3i(x, y, z);
-                const bool snap_free = occ[(1LL * x * dim(1) + y) * dim(2) + z] == 0;
-                const bool live_free = mu_rog->isFree(g, thresh);
-                ++checked;
-                if (snap_free != live_free)
-                {
-                    ++mismatches;
-                    if (printed < 20)
-                    {
-                        printf("#   mismatch g=%d %d %d snap_free=%d live_free=%d\n",
-                               g(0), g(1), g(2), snap_free, live_free);
-                        ++printed;
-                    }
-                }
-            }
-    printf("# diffOccupancy: checked=%lld mismatches=%lld (%.4f%%) in %.0f ms\n",
-           checked, mismatches, 100.0 * mismatches / std::max<long long>(1, checked),
-           t.ElapsedMs());
-}
-
-// Diagnostic: the ESDF ring-buffer hash is id(0)*mapY*mapZ + id(1)*mapZ +
-// id(2), so a long straight walk along X strides ~mapY*mapZ*8 bytes per
-// step (multi-MB at 0.05m res -- a guaranteed cache/DRAM miss every step),
-// while a walk along Z strides 8 bytes (contiguous). JPS's jump() does long
-// straight-line corridor walks; this checks whether that axis asymmetry is
-// large enough to matter at this map size.
-void axisStrideBench(std::shared_ptr<ROGMapUtil<3>> mu_rog, double thresh,
-                     const Vec3i &center, int span, int reps)
-{
-    volatile int sink = 0;
-    for (int axis = 0; axis < 3; ++axis)
-    {
-        Vec3i step = Vec3i::Zero();
-        step(axis) = 1;
-        // Each rep sweeps [-span/2, span/2] along `axis`, offset along a
-        // *different* axis so every rep touches fresh addresses (no
-        // cache/page reuse across reps -- this is meant to model a fresh
-        // long jump corridor scan, not a repeated hot-cache walk).
-        const int other_axis = (axis + 1) % 3;
-        Vec3i rep_step = Vec3i::Zero();
-        rep_step(other_axis) = 1;
-        long long total = 0;
-        Timer t(true);
-        for (int r = 0; r < reps; ++r)
-        {
-            Vec3i base = center + rep_step * (r - reps / 2);
-            for (int i = -span / 2; i <= span / 2; ++i)
-            {
-                Vec3i g = base + step * i;
-                sink += mu_rog->isFree(g, thresh) ? 1 : 0;
-                ++total;
-            }
-        }
-        const double ms = t.ElapsedMs();
-        printf("# axisStrideBench: axis=%c span=%d reps=%d queries=%lld time=%.2f ms "
-               "(%.2f ns/query)\n",
-               "xyz"[axis], span, reps, total, ms, ms * 1e6 / total);
-    }
-    (void)sink;
 }
 
 // Top-down SVG
@@ -281,29 +190,7 @@ Result runCase(Jps3dFrontend &fe, JPSPlanner3D::Timings (*tim)(Jps3dFrontend &),
     Timer t(true);
     if (per_cycle_update)
         fe.updateMap();
-    const bool dbg = std::getenv("JPS_DEBUG_DIM") &&
-                     std::string(std::getenv("JPS_DEBUG_DIM")) == "1";
-    if (dbg)
-        JPS::g_rog_debug_counters = JPS::RogDebugCounters();
     r.ok = fe.planPath(c.start, c.goal, a.eps, a.jps, path);
-    if (dbg)
-    {
-        const auto &cnt = JPS::g_rog_debug_counters;
-        printf("[JPS_DEBUG_DIM] isOutside: ceil_floor_reject=%lld inside_esdf_reject=%lld "
-               "inside_ok=%lld | free=%lld occupied=%lld\n",
-               cnt.reject_ceiling_floor, cnt.reject_inside_esdf, cnt.inside_ok,
-               cnt.free_count, cnt.occupied_count);
-        // Spatial extent of every distinct cell the search touched (hm_ with
-        // a non-null state), vs. the direct start->goal line -- tells us
-        // whether the search stayed local to the path or flooded the map.
-        const auto close = fe.debugPlanner()->getAllSet();
-        Vec3f mn = Vec3f::Constant(1e18), mx = Vec3f::Constant(-1e18);
-        for (auto &p : close) { mn = mn.cwiseMin(p); mx = mx.cwiseMax(p); }
-        printf("[JPS_DEBUG_DIM] allSet: n=%zu bbox_min=%.2f %.2f %.2f bbox_max=%.2f %.2f %.2f "
-               "start=%.2f %.2f %.2f goal=%.2f %.2f %.2f\n",
-               close.size(), mn(0), mn(1), mn(2), mx(0), mx(1), mx(2),
-               c.start(0), c.start(1), c.start(2), c.goal(0), c.goal(1), c.goal(2));
-    }
     r.first_ms = t.ElapsedMs();
     r.len = r.ok ? pathLength(path) : 0;
     r.attempts = fe.lastAttempts();
@@ -326,6 +213,236 @@ Result runCase(Jps3dFrontend &fe, JPSPlanner3D::Timings (*tim)(Jps3dFrontend &),
     r.p95_ms = runs[std::min(runs.size() - 1, (size_t)(runs.size() * 0.95))].first;
     r.med = runs[runs.size() / 2].second;
     return r;
+}
+// ---------------------------------------------------------------------------
+// "prof" mode: where does an A* expansion's time go?
+//  1. In-search phase split (needs -DJPS3D_PHASE_TIMING=ON): pop / successor
+//     generation (queries + node alloc) / successor processing (heap).
+//  2. Replay of the recorded expansion order through each layer of the
+//     per-neighbor query chain, so each layer's cost is measured on the real
+//     access pattern, isolated from the heap/bookkeeping.
+
+// This function calibrates the tsc (CPU fixed clock) to nanoseconds for an estimate
+// of how fast each function is running.
+double tscPerNs()
+{
+#ifdef JPS_PHASE_TIMING
+    auto c0 = std::chrono::steady_clock::now();
+    unsigned long long t0 = __rdtsc();
+    while (std::chrono::steady_clock::now() - c0 < std::chrono::milliseconds(200))
+    {
+    }
+    unsigned long long t1 = __rdtsc();
+    auto c1 = std::chrono::steady_clock::now();
+    return (t1 - t0) /
+           (double)std::chrono::duration_cast<std::chrono::nanoseconds>(c1 - c0).count();
+#else
+    return 0;
+#endif
+}
+
+template <class F> double timeNs(F &&f)
+{
+    f(); // warm
+    auto c0 = std::chrono::steady_clock::now();
+    f();
+    auto c1 = std::chrono::steady_clock::now();
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(c1 - c0).count();
+}
+
+void profileCase(Jps3dFrontend &fe, jps_test::TestROGMap &rog,
+                 ROGMapUtil<3> &mu, const PlanCase &c, const Algo &a,
+                 double tsc_ns, int reps, bool replay)
+{
+    // --- 1. phase split, base then fast (same frontend, toggled) ----------
+    std::vector<Vec3i> trace; // base-mode (global index) expansion order
+    for (bool fast : {false, true})
+    {
+        fe.setFastMode(fast);
+        fe.updateMap();
+        vec_Vec3f path;
+        fe.planPath(c.start, c.goal, a.eps, a.jps, path); // warm
+        std::vector<double> times;
+        bool ok = false;
+        for (int i = 0; i < std::max(1, reps); ++i)
+        {
+            Timer t(true);
+            ok = fe.planPath(c.start, c.goal, a.eps, a.jps, path);
+            times.push_back(t.ElapsedMs());
+        }
+        std::sort(times.begin(), times.end());
+        const double ms = times[times.size() / 2];
+        const auto &gs = fe.debugPlanner()->debugGraphSearch();
+        const auto &st = gs->stats();
+        const auto &tm = fe.lastTimings();
+        const double cyc2ms = tsc_ns > 0 ? 1e-6 / tsc_ns : 0;
+        const double pop = st.cyc_pop * cyc2ms, succ = st.cyc_succ * cyc2ms,
+                     proc = st.cyc_proc * cyc2ms;
+        printf("%-5s %-6s %-10s ok=%d len=%.4f med=%8.2fms search=%8.2f | pop=%8.2f "
+               "succ=%8.2f proc=%8.2f other=%7.2f | exp=%8lld succ=%9lld "
+               "push=%8lld incr=%8lld | ns/exp: pop=%5.0f succ=%5.0f proc=%5.0f\n",
+               fast ? "fast" : "base", c.name.c_str(), a.name.c_str(), ok,
+               ok ? pathLength(path) : 0.0, ms,
+               tm.search_ms, pop, succ, proc,
+               tm.search_ms - pop - succ - proc, st.expand, st.succ,
+               st.heap_push, st.heap_increase, pop * 1e6 / st.expand,
+               succ * 1e6 / st.expand, proc * 1e6 / st.expand);
+        if (!fast)
+            trace.assign(gs->expandTrace().begin(), gs->expandTrace().end());
+    }
+    if (!replay)
+        return;
+    if (trace.empty())
+    {
+        printf("  (no trace: rebuild with -DJPS3D_PHASE_TIMING=ON for replay)\n");
+        return;
+    }
+
+    // --- 2. replay the expansion order through each query-chain layer -----
+    const size_t n_exp = std::min<size_t>(trace.size(), 1000000);
+    std::vector<Vec3i> nb;
+    for (int dx = -1; dx <= 1; ++dx)
+        for (int dy = -1; dy <= 1; ++dy)
+            for (int dz = -1; dz <= 1; ++dz)
+                if (dx || dy || dz)
+                    nb.emplace_back(dx, dy, dz);
+    const double nq = double(n_exp) * nb.size();
+    const double th = kThreshRog;
+    MapUtil<3> &base_mu = mu; // force virtual dispatch like GraphSearch does
+    const auto &buf = mu.map_;
+    const int zc = mu.getVirtualCeilingIdZ(), zf = mu.getVirtualFloorIdZ();
+    const Vec3i dim = mu.getDim();
+    const Vec3i half = (dim - Vec3i::Ones()) / 2;
+    const int sy = dim(2), sx = dim(1) * dim(2);
+    auto toLocal = [&](int g, int ax) {
+        int l = g % dim(ax);
+        if (l > half(ax))
+            l -= dim(ax);
+        else if (l < -half(ax))
+            l += dim(ax);
+        return l + half(ax);
+    };
+    auto inlineHash = [&](const Vec3i &p) {
+        return toLocal(p(0), 0) * sx + toLocal(p(1), 1) * sy + toLocal(p(2), 2);
+    };
+    auto inside = [&](const Vec3i &p) {
+        return !(p(2) > zc || p(2) < zf) && rog.insideESDFMap(p);
+    };
+
+    std::vector<int> pre_idx(n_exp * nb.size());
+    for (size_t i = 0, k = 0; i < n_exp; ++i)
+        for (auto &d : nb)
+        {
+            const Vec3i p = trace[i] + d;
+            pre_idx[k++] = inside(p) ? inlineHash(p) : -1;
+        }
+
+    const auto &snap = fe.debugPlanner()->debugSnapshot();
+    const Vec3i slo = fe.debugPlanner()->debugSnapLo();
+    const Vec3i sdim = fe.debugPlanner()->debugSnapDim();
+
+    struct Layer
+    {
+        const char *name;
+        std::function<long long()> run;
+    };
+    std::vector<Layer> layers = {
+        {"empty loop (coord gen only)",
+         [&] {
+             long long acc = 0;
+             for (size_t i = 0; i < n_exp; ++i)
+                 for (auto &d : nb)
+                 {
+                     const Vec3i p = trace[i] + d;
+                     acc += p(0) ^ p(1) ^ p(2);
+                 }
+             return acc;
+         }},
+        {"base getSucc: v.isFree(Veci)+v.getIndex",
+         [&] {
+             long long acc = 0;
+             for (size_t i = 0; i < n_exp; ++i)
+                 for (auto &d : nb)
+                 {
+                     const Vec3i p = trace[i] + d;
+                     if (base_mu.isFree(p, th))
+                         acc += base_mu.getIndex(p) & 1;
+                 }
+             return acc;
+         }},
+        {"v.isFree(Veci) only",
+         [&] {
+             long long acc = 0;
+             for (size_t i = 0; i < n_exp; ++i)
+                 for (auto &d : nb)
+                     acc += base_mu.isFree(trace[i] + d, th);
+             return acc;
+         }},
+        {"rog direct: z+insideESDF+hash+load",
+         [&] {
+             long long acc = 0;
+             for (size_t i = 0; i < n_exp; ++i)
+                 for (auto &d : nb)
+                 {
+                     const Vec3i p = trace[i] + d;
+                     acc += inside(p) &&
+                            buf[rog.getESDFBufferIndexFromGlobalIndex(p)] >= th;
+                 }
+             return acc;
+         }},
+        {"  rog z+insideESDFMap only",
+         [&] {
+             long long acc = 0;
+             for (size_t i = 0; i < n_exp; ++i)
+                 for (auto &d : nb)
+                     acc += inside(trace[i] + d);
+             return acc;
+         }},
+        {"  rog getESDFBufferIndex only",
+         [&] {
+             long long acc = 0;
+             for (size_t i = 0; i < n_exp; ++i)
+                 for (auto &d : nb)
+                     acc += rog.getESDFBufferIndexFromGlobalIndex(trace[i] + d);
+             return acc;
+         }},
+        {"  inline modulo hash only",
+         [&] {
+             long long acc = 0;
+             for (size_t i = 0; i < n_exp; ++i)
+                 for (auto &d : nb)
+                     acc += inlineHash(trace[i] + d);
+             return acc;
+         }},
+        {"  ESDF double load only (pre-hashed)",
+         [&] {
+             long long acc = 0;
+             for (int idx : pre_idx)
+                 acc += idx >= 0 && buf[idx] >= th;
+             return acc;
+         }},
+        {"fast: snapshot byte (bounds+load)",
+         [&] {
+             long long acc = 0;
+             for (size_t i = 0; i < n_exp; ++i)
+                 for (auto &d : nb)
+                 {
+                     const Vec3i p = trace[i] + d - slo;
+                     acc += (p.array() >= 0).all() && (p.array() < sdim.array()).all() &&
+                            snap[((size_t)p(0) * sdim(1) + p(1)) * sdim(2) + p(2)] == 0;
+                 }
+             return acc;
+         }},
+    };
+    printf("  replay %zu expansions x %zu nbrs = %.0f queries:\n", n_exp,
+           nb.size(), nq);
+    for (auto &L : layers)
+    {
+        long long r = 0;
+        const double ns = timeNs([&] { r = L.run(); });
+        printf("    %-42s %7.2f ns/query  %8.1f ms total   (chk %lld)\n",
+               L.name, ns / nq, ns * 1e-6, r);
+    }
 }
 } // namespace
 
@@ -365,14 +482,8 @@ int main(int argc, char **argv)
         PlanCase{"trap2m_rev", Vec3f(0, 1.5, kZ), Vec3f(0, -0.5, kZ)},
         PlanCase{"nopath", Vec3f(0, -0.5, kZ), Vec3f(10, 10, kZ), false}
     };
-    // Waypoints through the real captured scene (output_with_ground.pcd,
-    // bounds x[-9.93,15.50] y[-20,-2] z[0,4.07], 13.9M pts). All anchored at
-    // (-8,-3), a clear spot near the top-left of the covered area, and
-    // walked along the scene's diagonal at increasing distance; "weave" is
-    // a short leg straight through the densest cluster instead of around
-    // the edge of the captured area, to force real maneuvering. z=1.0 sits
-    // inside the surveyed flight band [0.3,1.8] and well under the virtual
-    // ceiling (2.7). See docs/perf/2026-09-24-fast-mode-budget-gap.md.
+
+    // real map waypoints
     const double rz = 1.0;
     std::vector<PlanCase> real_cases = {
         PlanCase{"6m", Vec3f(-8.0, -3.0, rz), Vec3f(-8.0, -9.0, rz)},
@@ -391,8 +502,8 @@ int main(int argc, char **argv)
          }, real_cases},
     };
     std::vector<Algo> algos = {
-        {"jps", true, 1.0},
-        {"jps_e1.5", true, 1.5},
+        // {"jps", true, 1.0},
+        // {"jps_e1.5", true, 1.5},
         {"astar", false, 1.0},
         {"astar_e1.5", false, 1.5},
         {"astar_e2.0", false, 2.0},
@@ -434,15 +545,6 @@ int main(int argc, char **argv)
         printf("# scene %s: simple clone %.0f ms\n", sc.name.c_str(),
                t.ElapsedMs());
 
-        if (const char *e = std::getenv("JPS_DEBUG_DIFF"); e && std::string(e) == "1")
-            diffOccupancy(mu_rog, kThreshRog);
-        if (const char *e = std::getenv("JPS_DEBUG_STRIDE"); e && std::string(e) == "1")
-        {
-            Vec3i center_id;
-            rog->esdfMapPosToGlobalIndex(Vec3f(-8.0, -6.0, 1.0), center_id);
-            axisStrideBench(mu_rog, kThreshRog, center_id, 400, 400);
-        }
-
         // snap start/goal on the ROG util (same cells on both)
         // checks all start/goals before continuing
         for (auto &c : sc.cases)
@@ -456,12 +558,113 @@ int main(int argc, char **argv)
                 c.start = s, c.goal = g;
         }
 
+        if (mode_arg == "prof")
+        {
+            const double tsc_ns = tscPerNs();
+            printf("# prof: TSC %.3f cycles/ns%s\n", tsc_ns,
+                   tsc_ns > 0 ? "" : " (phase timers OFF)");
+            Jps3dFrontend fe(mu_rog, false, false, 0.0);
+            fe.setThreshVal(kThreshRog);
+            // argv[6] = "replay" also replays the query-chain layers
+            const bool replay = argc > 6 && std::string(argv[6]) == "replay";
+            for (auto &c : sc.cases)
+                for (auto &a : algos)
+                    if (!a.jps && a.eps == 1.5)
+                        profileCase(fe, *rog, *mu_rog, c, a, tsc_ns, reps,
+                                    replay);
+            rog.reset();
+            continue;
+        }
+
+        // "suite": fixed config matrix. Each rep times updateMap() (the
+        // fast-mode snapshot; a no-op in base mode) + planPath() together,
+        // then reports the median cycle plus the median run's phase split
+        // (pop/succ/proc are TSC cycles, only with -DJPS3D_PHASE_TIMING=ON).
+        if (mode_arg == "suite")
+        {
+            struct Cfg
+            {
+                const char *name;
+                bool fast, jps;
+                double eps;
+            } cfgs[] = {{"astar_base_e1.0", false, false, 1.0},
+                        {"astar_base_e1.5", false, false, 1.5},
+                        {"jps_fast_e1.0", true, true, 1.0},
+                        {"jps_fast_e1.5", true, true, 1.5},
+                        {"astar_fast_e1.0", true, false, 1.0},
+                        {"astar_fast_e1.5", true, false, 1.5}};
+            const double tsc_ns = tscPerNs();
+            const double cyc2ms = tsc_ns > 0 ? 1e-6 / tsc_ns : 0;
+            printf("# suite: reps=%d snapshot_threads=%s phase_timers=%s\n",
+                   reps, std::getenv("JPS_SNAPSHOT_THREADS") ?: "1",
+                   tsc_ns > 0 ? "on" : "off");
+            printf("%-16s %-6s %2s %8s | %9s %9s %9s | %8s %8s %9s %7s %7s %7s | "
+                   "%9s %9s %9s %8s | %9s %10s %9s %9s %9s\n",
+                   "cfg", "case", "ok", "len_m", "cycle_ms", "p95_ms", "first_ms",
+                   "snap_ms", "check", "search", "convert", "corner", "line",
+                   "pop", "succ", "proc", "other", "expand", "jump_steps",
+                   "queries", "push", "incr");
+            for (auto &cf : cfgs)
+            {
+                Jps3dFrontend fe(mu_rog, false, false, 0.0);
+                fe.setThreshVal(kThreshRog);
+                fe.setFastMode(cf.fast);
+                fe.updateMap(); // warm (first allocation of the snapshot)
+                for (auto &c : sc.cases)
+                {
+                    struct Run
+                    {
+                        double cycle, snap;
+                        JPSPlanner3D::Timings tm;
+                        JPS::GraphSearch<3>::Stats st;
+                    };
+                    vec_Vec3f path;
+                    Timer t1(true);
+                    fe.updateMap();
+                    bool ok = fe.planPath(c.start, c.goal, cf.eps, cf.jps, path);
+                    const double first = t1.ElapsedMs();
+                    const double len = ok ? pathLength(path) : 0;
+                    std::vector<Run> runs;
+                    for (int i = 0; i < reps; ++i)
+                    {
+                        Timer tc(true);
+                        fe.updateMap();
+                        fe.planPath(c.start, c.goal, cf.eps, cf.jps, path);
+                        const double ms = tc.ElapsedMs();
+                        runs.push_back({ms, cf.fast ? fe.lastSnapshotMs() : 0.0,
+                                        fe.lastTimings(),
+                                        fe.debugPlanner()->debugGraphSearch()->stats()});
+                    }
+                    std::sort(runs.begin(), runs.end(),
+                              [](auto &x, auto &y) { return x.cycle < y.cycle; });
+                    const Run &m = runs[runs.size() / 2];
+                    const double p95 =
+                        runs[std::min(runs.size() - 1, (size_t)(runs.size() * 0.95))].cycle;
+                    const double pop = m.st.cyc_pop * cyc2ms,
+                                 succ = m.st.cyc_succ * cyc2ms,
+                                 proc = m.st.cyc_proc * cyc2ms;
+                    printf("%-16s %-6s %2d %8.2f | %9.2f %9.2f %9.2f | %8.2f %8.3f "
+                           "%9.2f %7.3f %7.3f %7.3f | %9.2f %9.2f %9.2f %8.2f | "
+                           "%9lld %10lld %9lld %9lld %9lld\n",
+                           cf.name, c.name.c_str(), ok, len, m.cycle, p95, first,
+                           m.snap, m.tm.check_ms, m.tm.search_ms, m.tm.convert_ms,
+                           m.tm.corner_ms, m.tm.line_ms, pop, succ, proc,
+                           tsc_ns > 0 ? m.tm.search_ms - pop - succ - proc : 0.0,
+                           m.st.expand, m.st.jump_steps, m.st.cell_queries,
+                           m.st.heap_push, m.st.heap_increase);
+                    fflush(stdout);
+                }
+            }
+            rog.reset();
+            continue;
+        }
+
         struct Backend
         {
             const char *name;
             std::shared_ptr<MapUtil<3>> mu;
             double thresh;
-        } backends[] = {{"rog", mu_rog, kThreshRog}}; //, {"simple", mu_simple, 0.0}};
+        } backends[] ={{"rog", mu_rog, kThreshRog}}; //, {"simple", mu_simple, 0.0}};
 
         // headers for table to come
         printf("%-7s %-7s %-8s %-11s %-9s %3s %8s %8s %8s | %8s %8s %8s | %8s %9s %10s %3s\n",

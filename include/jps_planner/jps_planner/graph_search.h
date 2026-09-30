@@ -23,6 +23,17 @@
 #define JPS_STAT(expr) ((void)0)
 #endif
 
+// Optional per-phase cycle counters + expansion trace (for profiling the
+// A*/JPS main loop). Compile with -DJPS_PHASE_TIMING; otherwise elided.
+#ifdef JPS_PHASE_TIMING
+#include <x86intrin.h>
+#define JPS_TSC() __rdtsc()
+#define JPS_PHASE(expr) (expr)
+#else
+#define JPS_TSC() 0ULL
+#define JPS_PHASE(expr) ((void)0)
+#endif
+
 namespace JPS
 {
 // Heuristic weight used by compare_state's piecewise f-value below.
@@ -61,6 +72,7 @@ template <class T> struct compare_state
 
 /// Define priority queue
 struct State; // forward declaration
+
 /// State pointer -- raw pointer into GraphSearch's block pool (see
 /// StateBlock/state_pool_ below). Valid for the lifetime of the owning
 /// GraphSearch instance; never individually freed.
@@ -264,7 +276,8 @@ public:
     std::vector<StatePtr> getPath() const;
 
     /// Fast path: search a flat occupancy snapshot instead of calling
-    /// map_util_ per cell. `occ` holds xDim*yDim*zDim bytes, x fastest,
+    /// map_util_ per cell. `occ` holds xDim*yDim*zDim bytes in the
+    /// MapUtil::snapshotOccupancy layout (3D: z fastest; 2D: x fastest),
     /// 1 = blocked. Coordinates passed to plan() are then local to the
     /// snapshot. nullptr disables (default).
     void setFlatSnapshot(const uint8_t *occ) { flat_ = occ; }
@@ -305,8 +318,17 @@ public:
         long long jump_steps = 0;   ///< cells stepped through by jump()
         long long cell_queries = 0; ///< isFree/isOccupied map queries
         long long heap_push = 0;    ///< open-list insertions
+        // JPS_PHASE_TIMING only: TSC cycles per main-loop phase
+        long long heap_increase = 0; ///< decrease-key (pq_.increase) calls
+        unsigned long long cyc_pop = 0;  ///< pq_.top()+pop()
+        unsigned long long cyc_succ = 0; ///< getSucc/getJpsSucc
+        unsigned long long cyc_proc = 0; ///< successor g-update + heap ops
     };
     const Stats &stats() const { return stats_; }
+
+    /// JPS_PHASE_TIMING only: coordinates (search space) of every expanded
+    /// node, in expansion order, from the last plan().
+    const std::vector<Veci<Dim>> &expandTrace() const { return trace_; }
 
     /// Get the states in open set
     std::vector<StatePtr> getOpenSet() const;
@@ -388,6 +410,7 @@ private:
 
     std::vector<StatePtr> path_;
     mutable Stats stats_;
+    std::vector<Veci<Dim>> trace_;
     bool partial_ = false;
 
     const uint8_t *flat_ = nullptr;

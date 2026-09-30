@@ -11,13 +11,28 @@
 #include <rog_map/rog_map.h>
 #include <stdexcept>
 #include <string>
+#include <thread>
+#include <vector>
 
 namespace JPS
 {
+// Temporary diagnostic counters for isOutside()/isFree() outcomes on the
+// live (non-snapshot) ROGMapUtil query path. Guarded by JPS_DEBUG_DIM at the
+// print site in jps_planner.cpp; increment cost is negligible next to the
+// live-path's existing per-query overhead.
+struct RogDebugCounters
+{
+    long long reject_ceiling_floor = 0;
+    long long reject_inside_esdf = 0;
+    long long inside_ok = 0;
+    long long free_count = 0;
+    long long occupied_count = 0;
+};
+inline RogDebugCounters g_rog_debug_counters;
+
 /**
- * @biref MapUtil implementation for collision checking, backed by a
- * rog_map::ROGMap
- * @param Dim is the dimension of the workspace
+ * @brief MapUtil implementation for collision checking with rog_map::ROGMap
+ * @param Dim is workspace dimension
  * @param ValueT is the type of a single map cell's value, forwarded to
  * MapUtil<Dim, ValueT>. Defaults to double.
  */
@@ -28,7 +43,12 @@ public:
     using TmapValue = typename MapUtil<Dim, ValueT>::TmapValue;
     using Tmap = typename MapUtil<Dim, ValueT>::Tmap;
 
-    /// Simple constructor
+    /**
+     * @brief Construct a new ROGMapUtil object, sets up ROGMap dim_ to address
+     * ROGMap padding, and precomputes cell offsets within nearest_free_search_radius_m_.
+     * 
+     * @param map_struct_ptr 
+     */
     ROGMapUtil(std::shared_ptr<rog_map::ROGMap> map_struct_ptr)
         : map_(map_struct_ptr->getESDFBuffer())
     {
@@ -41,17 +61,15 @@ public:
         val_unknown_ = std::numeric_limits<double>::max();
         thresh_val_ = 0.0;
 
-        // dim_ must equal the ESDF ring buffer's own grid size, since
-        // getIndex() hashes into that buffer and GraphSearch sizes its node
-        // table from getDim(). ROG-Map's CounterMap pads the ESDF grid beyond
-        // map_size/res (see CounterMap::initCounterMap: half = floor(half_d /
-        // res) + (inflation_step + 1), size = 2*half + 1, with inflation_step
-        // 0 for the ESDF), so replicate that here and cross-check against the
-        // buffer length rather than rounding map_size/res.
+        // Computes ROGMap dim_
+        // ROGMap pads its map and ensures that there's always a clear middle (config.hpp:398-421)
         {
             const Vecf<Dim> half_d = map_class_ptr_->getLocalMapSize() / 2.0;
             for (int i = 0; i < Dim; ++i)
-                dim_(i) = 2 * (static_cast<int>(half_d(i) / res_) + 1) + 1;
+                dim_(i) =
+                    2 * (static_cast<int>(half_d(i) / res_) + 1) + 1;
+
+            // multiplies per axis dimensions into a total cell count and asserts
             long long prod = 1;
             for (int i = 0; i < Dim; ++i)
                 prod *= dim_(i);
@@ -64,8 +82,6 @@ public:
 
         // Precompute cell offsets within nearest_free_search_radius_m_, sorted
         // nearest-first, so getNearestKnownFreePos() can scan them directly.
-        // The radius is specified in meters and converted to cells here using
-        // the map resolution (rounded up so the full metric radius is covered).
         const int r =
             static_cast<int>(std::ceil(nearest_free_search_radius_m_ / res_));
         if constexpr (Dim == 3)
@@ -93,6 +109,7 @@ public:
                     sorted_neighbors_.emplace_back(dx, dy);
                 }
         }
+        // sort by distance
         std::sort(sorted_neighbors_.begin(), sorted_neighbors_.end(),
                   [](const Veci<Dim> &a, const Veci<Dim> &b)
                   { return a.squaredNorm() < b.squaredNorm(); });
@@ -109,28 +126,24 @@ public:
         {
             virtual_ceiling_ = map_class_ptr_->getVirtualCeilingHeight();
             virtual_floor_ = map_class_ptr_->getVirtualFloorHeight();
-            // posToGlobalIndex converts each axis independently, so the z
-            // result depends only on virtual_ceiling_/virtual_floor_ — the
-            // x/y=0 args just fill the discarded ceil_id.x()/.y(). A global
-            // index is an absolute lattice coordinate with no bounds check,
-            // so this is valid even if world XY=(0,0) is outside the map.
-            Vec3i ceil_id, floor_id;
-            map_class_ptr_->esdfMapPosToGlobalIndex(
-                Vec3f(0, 0, virtual_ceiling_), ceil_id);
-            map_class_ptr_->esdfMapPosToGlobalIndex(Vec3f(0, 0, virtual_floor_),
-                                                    floor_id);
-            virtual_ceiling_id_z_ = ceil_id.z();
-            virtual_floor_id_z_ = floor_id.z();
+            
+            // Once per run:
+            // posToGlobalIndex converts each axis independently to a global index.
+            // Global index is an absolute lattice coordinate, independent of sliding.
+            if (!virtual_ceiling_floor_set_)
+            {
+                Vec3i ceil_id, floor_id;
+                map_class_ptr_->esdfMapPosToGlobalIndex(
+                    Vec3f(0, 0, virtual_ceiling_), ceil_id);
+                map_class_ptr_->esdfMapPosToGlobalIndex(Vec3f(0, 0, virtual_floor_),
+                                                        floor_id);
+                virtual_ceiling_id_z_ = ceil_id.z();
+                virtual_floor_id_z_ = floor_id.z();
+            }
 
-            // insideESDFMap()/insideLocalMap() only bounds-check against the
-            // full allocated sliding window (rog_map.map_size), which is far
-            // larger than the region the ESDF solver actually refreshed this
-            // frame (rog_map.esdf.local_update_box, centered on current odom).
-            // A cell outside the updated bbox but inside the sliding window
-            // holds a stale distance value from a prior odom position, not a
-            // validated one, so isOutside() must reject it too. Cache as
-            // global indices here (once per plan) rather than converting on
-            // every isOutside() call in the graph-search hot path.
+            // caches ESDF bbox current id for bounds checks
+            // used for other things too, keep alive for now.
+            // todo: validate if we want to persist this.
             Vec3f bbox_min, bbox_max;
             map_class_ptr_->getESDFUpdatedBbox(bbox_min, bbox_max);
             map_class_ptr_->esdfMapPosToGlobalIndex(bbox_min,
@@ -139,6 +152,14 @@ public:
                                                     updated_bbox_max_id_);
         }
     }
+
+    /// Cached virtual ceiling/floor z-indices and updated-bbox global indices
+    /// from the last updateVirtualCeilingFloor() call. Exposed for tests that
+    /// need to observe what does/doesn't change across a map slide.
+    int getVirtualCeilingIdZ() const { return virtual_ceiling_id_z_; }
+    int getVirtualFloorIdZ() const { return virtual_floor_id_z_; }
+    Vec3i getUpdatedBboxMinId() const { return updated_bbox_min_id_; }
+    Vec3i getUpdatedBboxMaxId() const { return updated_bbox_max_id_; }
 
     /// Get map data
     Tmap getMap() override { return map_; }
@@ -187,7 +208,9 @@ public:
     /// Check if the cell is free by index
     bool isFree(int idx, TmapValue val) override
     {
-        return map_[idx] >= val;
+        bool free = map_[idx] >= val;
+        if (free) ++g_rog_debug_counters.free_count; else ++g_rog_debug_counters.occupied_count;
+        return free;
     } // Implicit assumption that unknown is free
     /// Check if the cell is unknown by index
     ///  Query unknown status from occupancy state instead of dist value
@@ -204,28 +227,37 @@ public:
         }
     }
     /// Check if the cell is occupied by index
-    bool isOccupied(int idx, TmapValue val) override { return map_[idx] < val; }
+    bool isOccupied(int idx, TmapValue val) override
+    {
+        bool occ = map_[idx] < val;
+        if (occ) ++g_rog_debug_counters.occupied_count; else ++g_rog_debug_counters.free_count;
+        return occ;
+    }
     /// Check if the cell is outside by coordinate
     bool isOutside(const Veci<Dim> &pn) override
     {
         if constexpr (Dim == 3)
         {
-            /// Take into consideration virtual ceil and floor.
-            /// pn is an ESDF global index; compare its z directly against the
-            /// precomputed ceil/floor z indices and use the integer
-            /// inside-map test — no per-cell float conversion.
+            // pn is an ESDF global index, check its z directly.
+            // outside of virtual ceiling or floor
             if (pn(2) > virtual_ceiling_id_z_ || pn(2) < virtual_floor_id_z_)
+            {
+                ++g_rog_debug_counters.reject_ceiling_floor;
                 return true;
+            }
+            // not inside ESDF map
             if (!map_class_ptr_->insideESDFMap(pn))
+            {
+                ++g_rog_debug_counters.reject_inside_esdf;
                 return true;
-            // insideESDFMap() alone only bounds pn against the full sliding
-            // window, not the (smaller) region the ESDF actually refreshed
-            // this frame — see updateVirtualCeilingFloor(). Reject cells
-            // outside that updated bbox too, since their distance values are
-            // stale rather than validated.
-            if ((pn.array() < updated_bbox_min_id_.array()).any() ||
-                (pn.array() > updated_bbox_max_id_.array()).any())
-                return true;
+            }
+
+            // TODO: I disagree with this check, i believe we should still
+            // search outside of the updated bbox.
+            // if ((pn.array() < updated_bbox_min_id_.array()).any() ||
+            //     (pn.array() > updated_bbox_max_id_.array()).any())
+            //     return true;
+            ++g_rog_debug_counters.inside_ok;
             return false;
         }
         return false;
@@ -524,13 +556,23 @@ public:
 
     decimal_t getThreshDist() override { return thresh_val_; }
 
-    /// Batched neighbor check (see MapUtil::freeNeighbors). When the whole
-    /// 3x3x3 block around pn is inside the ESDF window and between the
-    /// virtual floor/ceiling (almost always), the ring-buffer index is
-    /// computed once for pn and each neighbor's index is built from
-    /// per-axis terms with a compare-based wrap, so there is no modulo and
-    /// no virtual call per neighbor. Offsets must be within [-1, 1];
-    /// anything else falls back to the per-cell path.
+    /**
+     * @brief Batched neighbor check that returns a mask corresponding to each neighbor.
+     * Only usable when:
+     * 1) The entire 3x3x3 block around pn is inside the ESDF window 
+     * 2) 3x3x3 block is within the virtual floor / ceiling.
+     * 3) Offsets must be within [-1, 1] strictly. 
+     * 
+     * Ring-buffer index is computed once for pn (global point).
+     * Each neighbor's index offset / axis is built per-axis.
+     * 
+     * @param pn map coordinates (integer) corresponding to global point
+     * @param offs precomputed grid offsets
+     * @param n number of neighbors
+     * @param val threshold for free/occupied
+     * @param ids[out] ids that contain free
+     * @return uint32_t 
+     */
     uint32_t freeNeighbors(const Veci<Dim> &pn, const Veci<Dim> *offs, int n,
                            TmapValue val, int *ids) override
     {
@@ -548,32 +590,41 @@ public:
                 return MapUtil<Dim, ValueT>::freeNeighbors(pn, offs, n, val,
                                                            ids);
             const Vec3i half = (dim_ - one) / 2;
-            // term[axis][d + 1] = contribution of local index (pn + d) on
-            // that axis to the buffer hash, as in
-            // SlidingMap::getHashIndexFromGlobalIndex.
+                
+            // stride computes how much of the dimensions needs to be hopped over when flattening
             const int stride[3] = {dim_(1) * dim_(2), dim_(2), 1};
+            // initializes lookup table for indices
             int term[3][3];
+
+            // for each axis...
             for (int a = 0; a < 3; ++a)
             {
+                // center l because ROG map centers its window at 0
                 int l = pn(a) % dim_(a);
                 if (l > half(a))
                     l -= dim_(a);
                 else if (l < -half(a))
                     l += dim_(a);
+                
+                // offset
                 for (int d = -1; d <= 1; ++d)
                 {
                     int ld = l + d;
+                    // centering for the same reason
                     if (ld > half(a))
                         ld -= dim_(a);
                     else if (ld < -half(a))
                         ld += dim_(a);
+                    // inserts into term[axis][offset] the flattened index
                     term[a][d + 1] = (ld + half(a)) * stride[a];
                 }
             }
+            // mask corresponds to the occupancy read for all neighbors
             uint32_t mask = 0;
             for (int k = 0; k < n; ++k)
             {
                 const Vec3i &o = offs[k];
+                // this check skips batching for offsets that are > 1 (doesn't work)
                 if ((o.array().abs() > 1).any())
                 {
                     const Vec3i q = pn + o;
@@ -596,10 +647,16 @@ public:
         }
     }
 
-    /// Direct sweep of the ESDF ring buffer: no virtual calls and no modulo
-    /// in the inner loop (the local index is advanced incrementally along
-    /// x and wrapped once per row). Cells outside the ESDF's updated bbox or
-    /// the virtual floor/ceiling are blocked, exactly as isOutside() does.
+    /// Worker threads for snapshotOccupancy() (<= 1: sweep on the calling
+    /// thread). The sweep is memory-bound; 4 threads roughly halve it.
+    void setSnapshotThreads(int n) { snapshot_threads_ = n; }
+
+    /// Direct sweep of the ESDF ring buffer in its own memory order: the
+    /// buffer is z-fastest, and so is the 3D snapshot layout (see
+    /// MapUtil::snapshotOccupancy), so each (x, y) column is one contiguous
+    /// read and one contiguous write, with no virtual calls or modulo per
+    /// cell. Cells outside the ESDF's updated bbox or the virtual
+    /// floor/ceiling are blocked, exactly as isOutside() does.
     void snapshotOccupancy(const Veci<Dim> &lo, const Veci<Dim> &hi,
                            TmapValue val, std::vector<uint8_t> &out) override
     {
@@ -615,52 +672,99 @@ public:
                 out.clear();
                 return;
             }
-            out.assign(static_cast<size_t>(n(0)) * n(1) * n(2), 1);
+            const size_t total = static_cast<size_t>(n(0)) * n(1) * n(2);
+            const Vec3i vlo = lo.cwiseMax(updated_bbox_min_id_)
+                                  .cwiseMax(Vec3i(lo(0), lo(1), virtual_floor_id_z_));
+            const Vec3i vhi = hi.cwiseMin(updated_bbox_max_id_)
+                                  .cwiseMin(Vec3i(hi(0), hi(1), virtual_ceiling_id_z_));
+            // Every cell is written below when the valid box is the whole
+            // box (the usual case), so the 1-fill is only needed otherwise.
+            if (out.size() != total || vlo != lo || vhi != hi)
+                out.assign(total, 1);
+            if ((vhi.array() < vlo.array()).any())
+                return;
             const Vec3i half = (dim_ - Vec3i::Ones()) / 2;
-            // Global index -> local index in [-half, half] (see
-            // rog_map SlidingMap::globalIndexToLocalIndex).
-            auto toLocal = [&](int g, int axis)
+            // Global index -> ring-buffer coordinate in [0, dim)
+            // (rog_map SlidingMap::globalIndexToLocalIndex, shifted by half)
+            auto toBuf = [&](int g, int axis)
             {
                 int l = g % dim_(axis);
                 if (l > half(axis))
                     l -= dim_(axis);
                 else if (l < -half(axis))
                     l += dim_(axis);
-                return l;
+                return l + half(axis);
             };
-            const Vec3i vlo =
-                lo.cwiseMax(updated_bbox_min_id_)
-                    .cwiseMax(Vec3i(lo(0), lo(1), virtual_floor_id_z_));
-            const Vec3i vhi =
-                hi.cwiseMin(updated_bbox_max_id_)
-                    .cwiseMin(Vec3i(hi(0), hi(1), virtual_ceiling_id_z_));
-            const int sy = dim_(2), sx = dim_(1) * dim_(2);
-            for (int z = vlo(2); z <= vhi(2); ++z)
+            // Plain locals, captured by value: the uint8_t stores below may
+            // alias anything, so members / by-reference captures would be
+            // reloaded after every store and block vectorization.
+            const int dx = dim_(0), dy = dim_(1), dz = dim_(2);
+            const int sy = dz, sx = dy * dz;
+            const int ny = n(1), nzs = n(2);
+            const int x0 = vlo(0), y0 = vlo(1), y1 = vhi(1);
+            const int lx0 = toBuf(x0, 0), ly0 = toBuf(y0, 1),
+                      lz0 = toBuf(vlo(2), 2);
+            const int nz = vhi(2) - vlo(2) + 1;
+            const size_t off0 = static_cast<size_t>(x0 - lo(0)) * ny * nzs +
+                                static_cast<size_t>(y0 - lo(1)) * nzs +
+                                (vlo(2) - lo(2));
+            const TmapValue th = val;
+            const TmapValue *const buf = map_.data();
+            uint8_t *const dst = out.data();
+            auto sweep = [=](int xb, int xe)
             {
-                const int lz = toLocal(z, 2) + half(2);
-                for (int y = vlo(1); y <= vhi(1); ++y)
+                int lx = (lx0 + xb) % dx;
+                for (int xi = xb; xi < xe; ++xi, ++lx)
                 {
-                    const int ly = toLocal(y, 1) + half(1);
-                    int lx = toLocal(vlo(0), 0);
-                    uint8_t *row =
-                        out.data() +
-                        (static_cast<size_t>(z - lo(2)) * n(1) + (y - lo(1))) *
-                            n(0) +
-                        (vlo(0) - lo(0));
-                    for (int x = vlo(0); x <= vhi(0); ++x, ++lx)
+                    if (lx >= dx)
+                        lx -= dx;
+                    int ly = ly0;
+                    for (int y = y0; y <= y1; ++y, ++ly)
                     {
-                        if (lx > half(0))
-                            lx -= dim_(0);
-                        const int idx = (lx + half(0)) * sx + ly * sy + lz;
-                        row[x - vlo(0)] = (map_[idx] >= val) ? 0 : 1;
+                        if (ly >= dy)
+                            ly -= dy;
+                        uint8_t *__restrict col =
+                            dst + off0 +
+                            (static_cast<size_t>(xi) * ny + (y - y0)) * nzs;
+                        const TmapValue *__restrict src =
+                            buf + static_cast<size_t>(lx) * sx +
+                            static_cast<size_t>(ly) * sy;
+                        // The z column wraps at most once in the ring buffer
+                        int lz = lz0, k = 0;
+                        while (k < nz)
+                        {
+                            const int run = std::min(nz - k, dz - lz);
+                            for (int j = 0; j < run; ++j)
+                                col[k + j] = src[lz + j] >= th ? 0 : 1;
+                            k += run;
+                            lz = 0;
+                        }
                     }
                 }
+            };
+            const int nx = vhi(0) - vlo(0) + 1;
+            const int threads = std::min(snapshot_threads_, nx);
+            if (threads <= 1)
+            {
+                sweep(0, nx);
+                return;
             }
+            std::vector<std::thread> pool;
+            pool.reserve(threads - 1);
+            const int chunk = (nx + threads - 1) / threads;
+            for (int t = 1; t < threads; ++t)
+            {
+                const int b = t * chunk, e = std::min(nx, b + chunk);
+                if (b < e)
+                    pool.emplace_back(sweep, b, e);
+            }
+            sweep(0, std::min(nx, chunk));
+            for (auto &w : pool)
+                w.join();
         }
     }
 
-    /// Map entity (Raw data) -- aliases the live ROGMap ESDF buffer, which is
-    /// updated in place as the sliding map moves, so no per-call resync needed.
+    // reference to ESDF map buffer within ROGMap, reads directly from buffer.
     const Tmap &map_;
 
 protected:
@@ -682,6 +786,7 @@ protected:
     decimal_t virtual_ceiling_ = 4;
     decimal_t virtual_floor_ = -1;
     /// Virtual ceiling/floor as ESDF global z indices (precomputed in ctor)
+    bool virtual_ceiling_floor_set_ = false;
     int virtual_ceiling_id_z_ = 0;
     int virtual_floor_id_z_ = 0;
     /// ESDF actually-updated bbox as global indices, refreshed each plan()
@@ -689,6 +794,8 @@ protected:
     /// checked separately from insideESDFMap().
     Vec3i updated_bbox_min_id_ = Vec3i::Zero();
     Vec3i updated_bbox_max_id_ = Vec3i::Zero();
+    /// See setSnapshotThreads()
+    int snapshot_threads_ = 1;
 
     /// Search radius (in meters) for getNearestKnownFreePos(). Converted to
     /// cells in the ctor via the map resolution.

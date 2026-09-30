@@ -88,7 +88,7 @@ inline int GraphSearch<Dim, ValueT>::coordToId(int x, int y, int z) const
     if constexpr (Dim == 3)
     {
         if (flat_)
-            return x + xDim_ * (y + yDim_ * z);
+            return (x * yDim_ + y) * zDim_ + z;
         return map_util_->getIndex(Veci<Dim>(x, y, z));
     }
     else
@@ -128,7 +128,7 @@ inline bool GraphSearch<Dim, ValueT>::isFree(int x, int y, int z) const
         if (flat_)
             return x >= bx0_ && x <= bx1_ && y >= by0_ && y <= by1_ &&
                    z >= bz0_ && z <= bz1_ &&
-                   flat_[x + xDim_ * (y + yDim_ * z)] == 0;
+                   flat_[(x * yDim_ + y) * zDim_ + z] == 0;
         return map_util_->isFree(Veci<Dim>(x, y, z), thresh_val_);
     }
     else
@@ -167,7 +167,7 @@ inline bool GraphSearch<Dim, ValueT>::isOccupied(int x, int y, int z) const
         if (flat_)
             return !(x >= bx0_ && x <= bx1_ && y >= by0_ && y <= by1_ &&
                      z >= bz0_ && z <= bz1_ &&
-                     flat_[x + xDim_ * (y + yDim_ * z)] == 0);
+                     flat_[(x * yDim_ + y) * zDim_ + z] == 0);
         return map_util_->isOccupied(Veci<Dim>(x, y, z), thresh_val_);
     }
     else
@@ -320,14 +320,25 @@ bool GraphSearch<Dim, ValueT>::plan(StatePtr &currNode_ptr, int maxExpand,
 
     std::vector<int> succ_ids;
     std::vector<double> succ_costs;
+    JPS_PHASE(trace_.clear());
 
     while (true)
     {
         expand_iteration++;
         JPS_STAT(stats_.expand++);
         // get element with smallest cost
+        [[maybe_unused]] unsigned long long t0 = JPS_TSC();
         currNode_ptr = pq_.top();
         pq_.pop();
+        [[maybe_unused]] unsigned long long t1 = JPS_TSC();
+        JPS_PHASE(stats_.cyc_pop += t1 - t0);
+#ifdef JPS_PHASE_TIMING
+        if constexpr (Dim == 3)
+            trace_.emplace_back(currNode_ptr->x, currNode_ptr->y,
+                                currNode_ptr->z);
+        else
+            trace_.emplace_back(currNode_ptr->x, currNode_ptr->y);
+#endif
         currNode_ptr->closed = true; // Add to closed list
         if (currNode_ptr->h < best_h_ptr->h)
             best_h_ptr = currNode_ptr;
@@ -346,6 +357,8 @@ bool GraphSearch<Dim, ValueT>::plan(StatePtr &currNode_ptr, int maxExpand,
             getSucc(currNode_ptr, succ_ids, succ_costs);
         else
             getJpsSucc(currNode_ptr, succ_ids, succ_costs);
+        [[maybe_unused]] unsigned long long t2 = JPS_TSC();
+        JPS_PHASE(stats_.cyc_succ += t2 - t1);
 
         JPS_STAT(stats_.succ += succ_ids.size());
         // Process successors
@@ -367,6 +380,7 @@ bool GraphSearch<Dim, ValueT>::plan(StatePtr &currNode_ptr, int maxExpand,
                 if (child_ptr->opened && !child_ptr->closed)
                 {
                     pq_.increase(child_ptr->heapkey); // update heap
+                    JPS_PHASE(stats_.heap_increase++);
 
                     // Recompute travel direction from the new (cheaper)
                     // parent, for both A* and JPS. A JPS jump always travels
@@ -412,6 +426,7 @@ bool GraphSearch<Dim, ValueT>::plan(StatePtr &currNode_ptr, int maxExpand,
                 }
             } //
         } // Process successors
+        JPS_PHASE(stats_.cyc_proc += JPS_TSC() - t2);
 
         if (maxExpand > 0 && expand_iteration >= maxExpand)
         {
@@ -538,6 +553,7 @@ void GraphSearch<Dim, ValueT>::getSucc(const StatePtr &curr,
             {
                 continue;
             }
+            // Cell hasn't been visited
             if (visited_[new_id] != current_planning_token_)
             {
                 visited_[new_id] = current_planning_token_;

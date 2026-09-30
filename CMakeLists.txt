@@ -152,6 +152,13 @@ option(JPS3D_WITH_ROG_MAP "Build ROGMap-backed tests and benchmark" OFF)
 if(JPS3D_WITH_ROG_MAP)
   # search counters (GraphSearch::Stats) for the benchmark
   target_compile_definitions(jps_lib PUBLIC JPS_PROFILE)
+  # Per-phase TSC timers + expansion trace in GraphSearch (bench "prof"
+  # mode). Adds a few rdtsc per expansion, so keep it off for normal benches.
+  option(JPS3D_PHASE_TIMING "GraphSearch phase timers (profiling builds)" OFF)
+  if(JPS3D_PHASE_TIMING)
+    target_compile_definitions(jps_lib PUBLIC JPS_PHASE_TIMING)
+  endif()
+  find_package(rog_map REQUIRED)
   find_package(PCL REQUIRED COMPONENTS common io)
   find_package(pcl_conversions REQUIRED)
   find_package(tf2_ros REQUIRED)
@@ -177,12 +184,21 @@ if(JPS3D_WITH_ROG_MAP)
   add_test(test_map_util_super test_map_util_super
     ${CMAKE_SOURCE_DIR}/test/data/rog_map_bench.yaml)
 
-  jps3d_rog_target(test_planner_3d_rog_map test/test_planner_3d_rog_map.cpp)
-  add_test(test_planner_3d_rog_map test_planner_3d_rog_map
-    ${CMAKE_SOURCE_DIR}/test/data/rog_map_bench_pcd.yaml)
+  jps3d_rog_target(test_rog_map_slide_invariants
+    test/test_rog_map_slide_invariants.cpp src/jps3d_frontend.cpp)
+  add_test(test_rog_map_slide_invariants test_rog_map_slide_invariants
+    ${CMAKE_SOURCE_DIR}/test/data/rog_map_bench.yaml)
 
   jps3d_rog_target(bench_jps_rog_map test/bench_jps_rog_map.cpp
     src/jps3d_frontend.cpp)
+
+  jps3d_rog_target(bench_astar_rog test/bench_astar_rog_map.cpp
+    src/jps3d_frontend.cpp)
+
+  jps3d_rog_target(bench_snapshot_rog test/bench_snapshot_rog_map.cpp)
+
+  jps3d_rog_target(bench_astar_reference test/bench_astar_reference.cpp)
+    
 endif()
 
 ament_package()

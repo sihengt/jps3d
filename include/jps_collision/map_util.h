@@ -12,39 +12,25 @@
 
 namespace JPS
 {
-/// The type of map data Tmap is defined as a 1D array. Kept as free aliases
-/// (= double) for backward compatibility with non-templated files that use
-/// these names directly; MapUtil and its templated owners below use their
-/// own nested TmapValue/Tmap (bound to ValueT) instead.
-using TmapValue = double;
-using Tmap = std::vector<TmapValue>;
-
 /**
  * @brief Abstract interface for the map util classes used for collision
  * checking
  * @param Dim is the dimension of the workspace
  * @param ValueT is the type of a single map cell's value. Defaults to
- * double so every existing MapUtil<Dim> caller keeps compiling unchanged;
- * a future backend (e.g. an int8_t-based octomap) can swap this via
- * MapUtil<Dim, int8_t> without touching anything else.
- *
- * Map-implementation independent: has no dependency on any concrete map
- * backend.
+ * double; a future backend (e.g. int8_t-based octomap) can swap this via
+ * MapUtil<Dim, int8_t>.
  */
 template <int Dim, typename ValueT = double> class MapUtil
 {
 public:
-    /// Nested value-type aliases, bound to ValueT. Unqualified TmapValue/Tmap
-    /// used below (and in derived classes) resolve to these rather than the
-    /// free JPS::TmapValue/JPS::Tmap aliases above.
     using TmapValue = ValueT;
     using Tmap = std::vector<ValueT>;
 
     virtual ~MapUtil() = default;
 
-    /// Refresh the virtual ceiling/floor and any other state that depends on
-    /// the map having possibly slid. Must be called whenever the map may
-    /// have slid (i.e. at the start of every plan()).
+    // Refresh the virtual ceiling/floor and any other state that depends on
+    // the map having possibly slid. Must be called whenever the map may
+    // have slid (i.e. at the start of every plan()).
     virtual void updateVirtualCeilingFloor() = 0;
 
     /// Get map data
@@ -146,7 +132,9 @@ public:
 
     /// Flat occupancy snapshot of the cell box [lo, hi] (inclusive), for the
     /// planner's fast path. `out` is resized to prod(hi - lo + 1), indexed
-    /// x-fastest by (pn - lo), and holds 0 for cells that are free at
+    /// by p = pn - lo as (p.x * ny + p.y) * nz + p.z in 3D (z-fastest, the
+    /// ESDF ring buffer's own order) and p.x + nx * p.y in 2D (see
+    /// GraphSearch::coordToId), and holds 0 for cells that are free at
     /// threshold `val` and 1 for everything else (occupied, unknown-as-
     /// occupied if the backend says so, outside the map, above the ceiling).
     /// The default queries isFree() per cell; backends should override with
@@ -164,9 +152,9 @@ public:
         if constexpr (Dim == 3)
         {
             size_t k = 0;
-            for (int z = 0; z < n(2); ++z)
+            for (int x = 0; x < n(0); ++x)
                 for (int y = 0; y < n(1); ++y)
-                    for (int x = 0; x < n(0); ++x, ++k)
+                    for (int z = 0; z < n(2); ++z, ++k)
                         out[k] = isFree(lo + Veci<Dim>(x, y, z), val) ? 0 : 1;
         }
         else

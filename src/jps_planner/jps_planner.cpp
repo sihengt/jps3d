@@ -1,5 +1,7 @@
 #include "../../test/timer.hpp"
+#include <cstdlib>
 #include <iostream>
+#include <string>
 #include <jps_planner/jps_planner/jps_planner.h>
 
 template <int Dim, typename ValueT>
@@ -29,21 +31,22 @@ vec_Vecf<Dim> JPSPlanner<Dim, ValueT>::getRawPath()
 
 template <int Dim, typename ValueT> void JPSPlanner<Dim, ValueT>::updateMap()
 {
+    // lo / hi -= map_util_-> lo_d / hi_d
+
     // (The former full-map copy into cmap_ was never read; removed.)
     if (!fast_mode_ || !map_util_)
         return;
     JPS::Timer t(true);
     map_util_->updateVirtualCeilingFloor();
+    
+    // get map bounds and convert into voxel coords
     Vecf<Dim> lo_d, hi_d;
     map_util_->getLocalMapBound(lo_d, hi_d);
     Veci<Dim> lo = map_util_->floatToInt(lo_d);
     Veci<Dim> hi = map_util_->floatToInt(hi_d);
-    // Trim each axis to the cells the map util actually accepts (the bound
-    // may be an exclusive corner, and z is cut by the virtual floor/ceiling).
-    // Trim one axis at a time, probing from the centre of the already
-    // trimmed axes. z goes first: only z has the virtual floor/ceiling, so
-    // once z is trimmed the centre is inside on every axis and x/y can be
-    // probed safely.
+    
+
+    // increases low / decreases hi until the integer values fail "isOutside()" check.
     auto trim = [&](int i)
     {
         const Veci<Dim> mid = (lo + hi) / 2;
@@ -56,7 +59,9 @@ template <int Dim, typename ValueT> void JPSPlanner<Dim, ValueT>::updateMap()
         while (lo(i) < hi(i) && map_util_->isOutside(probe))
             probe(i) = ++lo(i);
     };
+    // deals with virtual ceiling (z) first
     trim(Dim - 1);
+    // deals with other axes
     for (int i = 0; i < Dim - 1; ++i)
         trim(i);
     if (planner_verbose_)
@@ -64,6 +69,7 @@ template <int Dim, typename ValueT> void JPSPlanner<Dim, ValueT>::updateMap()
                   << hi.transpose() << std::endl;
     snap_lo_ = lo;
     snap_dim_ = hi - lo + Veci<Dim>::Ones();
+    // create snapshotOccupancy
     map_util_->snapshotOccupancy(lo, hi, thresh_val_, occ_);
     snapshot_ms_ = t.ElapsedMs();
 }
@@ -263,6 +269,7 @@ bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start,
         return false;
     }
 
+    // timing to check if start/goal is free, marked as phase
     timings_.check_ms = t_phase.ElapsedMs();
     t_phase.Reset();
 
@@ -277,7 +284,18 @@ bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start,
         status_ = -1;
         return false;
     }
+    
+    // TODO: validate bounds check for fast_mode_
     const Veci<Dim> dim = fast_mode_ ? snap_dim_ : map_util_->getDim();
+    const bool jps_debug_dim = [] {
+        const char *e = std::getenv("JPS_DEBUG_DIM");
+        return e && std::string(e) == "1";
+    }();
+    if (jps_debug_dim)
+        std::cout << "[JPS_DEBUG_DIM] fast_mode=" << fast_mode_
+                  << " dim=" << dim.transpose()
+                  << " snap_dim_=" << snap_dim_.transpose()
+                  << " full_dim=" << map_util_->getDim().transpose() << std::endl;
     Veci<Dim> start_l = start_int, goal_l = goal_int;
     if (fast_mode_)
     {
@@ -294,6 +312,8 @@ bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start,
             return false;
         }
     }
+
+    // Check if dimensions have changed - if so, create a new graph_search_ with new dimensions and map_util_
     bool dims_changed;
     if (Dim == 3)
         dims_changed = dim(0) != graph_search_dim_x_ ||

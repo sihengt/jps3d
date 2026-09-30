@@ -34,7 +34,7 @@ rog_map:
 
   esdf:
     enable: true
-    resolution: 0.2
+    resolution: 0.05
     local_update_box: [40, 40, 20]
 
   ros_callback:
