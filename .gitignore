@@ -1,1 +1,12 @@
 build/
+build*/
+.worktrees/
+install/
+log/
+docs/**/*.svg
+*.pyc
+super_planner/
+build_rog*/
+build_task*/
+docs/perf*
+docs/superpowers*

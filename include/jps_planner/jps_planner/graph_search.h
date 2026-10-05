@@ -6,45 +6,86 @@
 #ifndef JPS_GRAPH_SEARCH_H
 #define JPS_GRAPH_SEARCH_H
 
-#include <boost/heap/d_ary_heap.hpp>      // boost::heap::d_ary_heap
-#include <memory>                         // std::shared_ptr
-#include <limits>                         // std::numeric_limits
-#include <vector>                         // std::vector
-#include <unordered_map>                  // std::unordered_map
+#include <boost/heap/d_ary_heap.hpp> // boost::heap::d_ary_heap
+#include <jps_collision/map_util.h>
+#include <algorithm>
+#include <cstdint>
+#include <limits>        // std::numeric_limits
+#include <memory>        // std::shared_ptr
+#include <unordered_map> // std::unordered_map
+#include <vector>        // std::vector
+
+// Optional search statistics (expansions, jump steps, map queries...).
+// Compile with -DJPS_PROFILE to enable; otherwise the counters are elided.
+#ifdef JPS_PROFILE
+#define JPS_STAT(expr) (expr)
+#else
+#define JPS_STAT(expr) ((void)0)
+#endif
+
+// Optional per-phase cycle counters + expansion trace (for profiling the
+// A*/JPS main loop). Compile with -DJPS_PHASE_TIMING; otherwise elided.
+#ifdef JPS_PHASE_TIMING
+#include <x86intrin.h>
+#define JPS_TSC() __rdtsc()
+#define JPS_PHASE(expr) (expr)
+#else
+#define JPS_TSC() 0ULL
+#define JPS_PHASE(expr) ((void)0)
+#endif
 
 namespace JPS
 {
-  ///Heap element comparison
-  template <class T>
-  struct compare_state
-  {
+/// Heap element comparison
+template <class T> struct compare_state
+{
+    // XDP/A*_epsilon-style smoothing of the weighted heuristic:
+    //   h > g : f = g + h
+    //   h <= g: f = (g + (2w - 1) * h) / w
+    // Degrades to plain weighted-A* (f = g + w*h) when h > g dominates
+    // near the goal, while staying closer to Dijkstra-consistent
+    // ordering away from the goal where h <= g. a->h is the raw
+    // (unweighted) heuristic; w is the owning GraphSearch's eps_.
+    static double fval(const T &a, double w)
+    {
+        double g = a->g, h = a->h;
+        return (h > g) ? (g + h) : ((g + (2.0 * w - 1.0) * h) / w);
+    }
+
+    // Compares the cached State::f (= fval(), refreshed by GraphSearch
+    // whenever g changes) so each heap comparison is two loads instead of
+    // two fval() evaluations.
     bool operator()(T a1, T a2) const
     {
-      double f1 = a1->g + a1->h;
-      double f2 = a2->g + a2->h;
-      if( ( f1 >= f2 - 0.000001) && (f1 <= f2 +0.000001) )
-        return a1->g < a2->g; // if equal compare gvals
-      return f1 > f2;
+        double f1 = a1->f;
+        double f2 = a2->f;
+        if ((f1 >= f2 - 0.000001) && (f1 <= f2 + 0.000001))
+            return a1->g < a2->g; // if equal compare gvals
+        return f1 > f2;
     }
-  };
+};
 
+/// Define priority queue
+struct State; // forward declaration
 
-  ///Define priority queue
-  struct State; // forward declaration
-  ///State pointer
-  using StatePtr = std::shared_ptr<State>;
-  using priorityQueue = boost::heap::d_ary_heap<StatePtr, boost::heap::mutable_<true>,
-                        boost::heap::arity<2>, boost::heap::compare< compare_state<StatePtr> >>;
+/// State pointer -- raw pointer into GraphSearch's block pool (see
+/// StateBlock/state_pool_ below). Valid for the lifetime of the owning
+/// GraphSearch instance; never individually freed.
+using StatePtr = State *;
+using priorityQueue =
+    boost::heap::d_ary_heap<StatePtr, boost::heap::mutable_<true>,
+                            boost::heap::arity<2>,
+                            boost::heap::compare<compare_state<StatePtr>>>;
 
-  ///Node of the graph in graph search
-  struct State
-  {
+/// Node of the graph in graph search
+struct State
+{
     /// ID
     int id;
     /// Coord
     int x, y, z = 0;
     /// direction
-    int dx, dy, dz;                            // discrete coordinates of this node
+    int dx, dy, dz; // discrete coordinates of this node
     /// id of predicessors
     int parentId = -1;
 
@@ -55,25 +96,33 @@ namespace JPS
     double g = std::numeric_limits<double>::infinity();
     /// heuristic cost
     double h;
+    /// cached compare_state::fval(g, h); valid while in the open list
+    double f = std::numeric_limits<double>::infinity();
     /// if has been opened
     bool opened = false;
     /// if has been closed
     bool closed = false;
 
+    // Needed so state_pool_'s StateBlock can default-construct a vector<State>
+    // slot; allocateState() overwrites the slot via placement assignment.
+    State() = default;
+
     /// 2D constructor
-    State(int id, int x, int y, int dx, int dy )
-      : id(id), x(x), y(y), dx(dx), dy(dy)
-    {}
+    State(int id, int x, int y, int dx, int dy)
+        : id(id), x(x), y(y), dx(dx), dy(dy)
+    {
+    }
 
     /// 3D constructor
-    State(int id, int x, int y, int z, int dx, int dy, int dz )
-      : id(id), x(x), y(y), z(z), dx(dx), dy(dy), dz(dz)
-    {}
+    State(int id, int x, int y, int z, int dx, int dy, int dz)
+        : id(id), x(x), y(y), z(z), dx(dx), dy(dy), dz(dz)
+    {
+    }
+};
 
-  };
-
-  ///Search and prune neighbors for JPS 2D
-  struct JPS2DNeib {
+/// Search and prune neighbors for JPS 2D
+struct JPS2DNeib
+{
     // for each (dx,dy) these contain:
     //    ns: neighbors that are always added
     //    f1: forced neighbors to check
@@ -81,8 +130,8 @@ namespace JPS
     int ns[9][2][8];
     int f1[9][2][2];
     int f2[9][2][2];
-    // nsz contains the number of neighbors for the four different types of moves:
-    // no move (norm 0):        8 neighbors always added
+    // nsz contains the number of neighbors for the four different types of
+    // moves: no move (norm 0):        8 neighbors always added
     //                          0 forced neighbors to check (never happens)
     //                          0 neighbors to add if forced (never happens)
     // straight (norm 1):       1 neighbor always added
@@ -95,15 +144,16 @@ namespace JPS
 
     void print();
     JPS2DNeib();
-    private:
-    void Neib(int dx, int dy, int norm1, int dev, int& tx, int& ty);
-    void FNeib(int dx, int dy, int norm1, int dev,
-        int& fx, int& fy, int& nx, int& ny);
-  };
 
+private:
+    void Neib(int dx, int dy, int norm1, int dev, int &tx, int &ty);
+    void FNeib(int dx, int dy, int norm1, int dev, int &fx, int &fy, int &nx,
+               int &ny);
+};
 
-  ///Search and prune neighbors for JPS 3D
-  struct JPS3DNeib {
+/// Search and prune neighbors for JPS 3D
+struct JPS3DNeib
+{
     // for each (dx,dy,dz) these contain:
     //    ns: neighbors that are always added
     //    f1: forced neighbors to check
@@ -111,8 +161,8 @@ namespace JPS
     int ns[27][3][26];
     int f1[27][3][12];
     int f2[27][3][12];
-    // nsz contains the number of neighbors for the four different types of moves:
-    // no move (norm 0):        26 neighbors always added
+    // nsz contains the number of neighbors for the four different types of
+    // moves: no move (norm 0):        26 neighbors always added
     //                          0 forced neighbors to check (never happens)
     //                          0 neighbors to add if forced (never happens)
     // straight (norm 1):       1 neighbor always added
@@ -126,143 +176,293 @@ namespace JPS
     //                          12 neighbors to add if forced
     static constexpr int nsz[4][2] = {{26, 0}, {1, 8}, {3, 12}, {7, 12}};
     JPS3DNeib();
-    private:
-    void Neib(int dx, int dy, int dz, int norm1, int dev, int& tx, int& ty, int& tz);
-    void FNeib( int dx, int dy, int dz, int norm1, int dev,
-        int& fx, int& fy, int& fz,
-        int& nx, int& ny, int& nz);
-  };
 
+private:
+    void Neib(int dx, int dy, int dz, int norm1, int dev, int &tx, int &ty,
+              int &tz);
+    void FNeib(int dx, int dy, int dz, int norm1, int dev, int &fx, int &fy,
+               int &fz, int &nx, int &ny, int &nz);
+};
 
-  /**
-   * @brief GraphSearch class
-   *
-   * Implement A* and Jump Point Search
-   */
-  class GraphSearch
-  {
-    public:
-     /**
-       * @brief 2D graph search constructor
-       *
-       * @param cMap 1D array stores the occupancy, with the order equal to \f$x + xDim * y\f$
-       * @param xDim map length
-       * @param yDim map width
-       * @param eps weight of heuristic, optional, default as 1
-       * @param verbose flag for printing debug info, optional, default as false
-       */
-      GraphSearch(const char* cMap, int xDim, int yDim, double eps = 1, bool verbose = false);
-      /**
-       * @brief 3D graph search constructor
-       *
-       * @param cMap 1D array stores the occupancy, with the order equal to \f$x + xDim * y + xDim * yDim * z\f$
-       * @param xDim map length
-       * @param yDim map width
-       * @param zDim map height
-       * @param eps weight of heuristic, optional, default as 1
-       * @param verbose flag for printing debug info, optional, default as False
-       */
-      GraphSearch(const char* cMap, int xDim, int yDim, int zDim, double eps = 1, bool verbose = false);
+/**
+ * @brief GraphSearch class
+ *
+ * Implement A* and Jump Point Search
+ *
+ * @param Dim is the dimension of the workspace
+ * @param ValueT is the map cell value type, forwarded to MapUtil<Dim,
+ * ValueT>. Defaults to double so existing GraphSearch<Dim> callers keep
+ * compiling unchanged.
+ */
+template <int Dim, typename ValueT = double> class GraphSearch
+{
+public:
+    using TmapValue = ValueT;
+    using Tmap = std::vector<ValueT>;
 
-      /**
-       * @brief start 2D planning thread
-       *
-       * @param xStart start x coordinate
-       * @param yStart start y coordinate
-       * @param xGoal goal x coordinate
-       * @param yGoal goal y coordinate
-       * @param useJps if true, enable JPS search; else the planner is implementing A*
-       * @param maxExpand maximum number of expansion allowed, optional, default is -1, means no limitation
-       */
-      bool plan(int xStart, int yStart, int xGoal, int yGoal, bool useJps, int maxExpand = -1);
-      /**
-       * @brief start 3D planning thread
-       *
-       * @param xStart start x coordinate
-       * @param yStart start y coordinate
-       * @param zStart start z coordinate
-       * @param xGoal goal x coordinate
-       * @param yGoal goal y coordinate
-       * @param zGoal goal z coordinate
-       * @param useJps if true, enable JPS search; else the planner is implementing A*
-       * @param maxExpand maximum number of expansion allowed, optional, default is -1, means no limitation
-       */
-      bool plan(int xStart, int yStart, int zStart, int xGoal, int yGoal, int zGoal, bool useJps, int maxExpand = -1);
+    /**
+     * @brief 2D graph search constructor
+     *
+     * @param map_util map util used for collision checking
+     * @param xDim map length
+     * @param yDim map width
+     * @param eps weight of heuristic, optional, default as 1
+     * @param verbose flag for printing debug info, optional, default as false
+     */
+    GraphSearch(const std::shared_ptr<MapUtil<Dim, ValueT>> &map_util, int xDim,
+                int yDim, double eps = 1, bool verbose = false);
+    /**
+     * @brief 3D graph search constructor
+     *
+     * @param map_util map util used for collision checking
+     * @param xDim map length
+     * @param yDim map width
+     * @param zDim map height
+     * @param eps weight of heuristic, optional, default as 1
+     * @param verbose flag for printing debug info, optional, default as False
+     */
+    GraphSearch(const std::shared_ptr<MapUtil<Dim, ValueT>> &map_util, int xDim,
+                int yDim, int zDim, double eps = 1, bool verbose = false);
 
-      /// Get the optimal path
-      std::vector<StatePtr> getPath() const;
+    /// Set thresh_val_
+    void setThreshVal(TmapValue thresh_val) { thresh_val_ = thresh_val; }
 
-      /// Get the states in open set
-      std::vector<StatePtr> getOpenSet() const;
+    /// Set the heuristic weight. The GraphSearch is now built once and
+    /// reused across plans (see JPSPlanner::setMapUtil), so eps must be
+    /// settable per-plan rather than fixed at construction.
+    void setEps(double eps)
+    {
+        eps_ = eps;
+    }
 
-      /// Get the states in close set
-      std::vector<StatePtr> getCloseSet() const;
+    /**
+     * @brief start 2D planning thread
+     *
+     * @param xStart start x coordinate
+     * @param yStart start y coordinate
+     * @param xGoal goal x coordinate
+     * @param yGoal goal y coordinate
+     * @param useJps if true, enable JPS search; else the planner is
+     * implementing A*
+     * @param maxExpand maximum number of expansion allowed, optional, default
+     * is -1, means no limitation
+     */
+    bool plan(int xStart, int yStart, int xGoal, int yGoal, bool useJps,
+              int maxExpand = -1);
+    /**
+     * @brief start 3D planning thread
+     *
+     * @param xStart start x coordinate
+     * @param yStart start y coordinate
+     * @param zStart start z coordinate
+     * @param xGoal goal x coordinate
+     * @param yGoal goal y coordinate
+     * @param zGoal goal z coordinate
+     * @param useJps if true, enable JPS search; else the planner is
+     * implementing A*
+     * @param maxExpand maximum number of expansion allowed, optional, default
+     * is -1, means no limitation
+     */
+    bool plan(int xStart, int yStart, int zStart, int xGoal, int yGoal,
+              int zGoal, bool useJps, int maxExpand = -1);
 
-      /// Get the states in hash map
-      std::vector<StatePtr> getAllSet() const;
+    /// Get the optimal path
+    std::vector<StatePtr> getPath() const;
 
-    private:
-      /// Main planning loop
-      bool plan(StatePtr& currNode_ptr, int max_expand, int start_id, int goal_id);
-      /// Get successor function for A*
-      void getSucc(const StatePtr& curr, std::vector<int>& succ_ids, std::vector<double>& succ_costs);
-      /// Get successor function for JPS
-      void getJpsSucc(const StatePtr& curr, std::vector<int>& succ_ids, std::vector<double>& succ_costs);
-      /// Recover the optimal path
-      std::vector<StatePtr> recoverPath(StatePtr node, int id);
+    /// Fast path: search a flat occupancy snapshot instead of calling
+    /// map_util_ per cell. `occ` holds xDim*yDim*zDim bytes in the
+    /// MapUtil::snapshotOccupancy layout (3D: z fastest; 2D: x fastest),
+    /// 1 = blocked. Coordinates passed to plan() are then local to the
+    /// snapshot. nullptr disables (default).
+    void setFlatSnapshot(const uint8_t *occ) { flat_ = occ; }
 
-      /// Get subscript
-      int coordToId(int x, int y) const;
-      /// Get subscript
-      int coordToId(int x, int y, int z) const;
+    /// Restrict the search to the inclusive cell box [lo, hi] (snapshot
+    /// coordinates). Only honoured in flat mode. enable=false restores the
+    /// full snapshot.
+    void setSearchBox(const Veci<Dim> &lo, const Veci<Dim> &hi, bool enable)
+    {
+        if (!enable)
+        {
+            bx0_ = by0_ = bz0_ = 0;
+            bx1_ = xDim_ - 1;
+            by1_ = yDim_ - 1;
+            bz1_ = Dim == 3 ? zDim_ - 1 : 0;
+            return;
+        }
+        bx0_ = std::max(0, lo(0));
+        by0_ = std::max(0, lo(1));
+        bx1_ = std::min(xDim_ - 1, hi(0));
+        by1_ = std::min(yDim_ - 1, hi(1));
+        if constexpr (Dim == 3)
+        {
+            bz0_ = std::max(0, lo(2));
+            bz1_ = std::min(zDim_ - 1, hi(2));
+        }
+    }
 
-      /// Check if (x, y) is free
-      bool isFree(int x, int y) const;
-      /// Check if (x, y, z) is free
-      bool isFree(int x, int y, int z) const;
+    /// True if the last plan() stopped at maxExpand and getPath() holds a
+    /// partial path to the expanded node with the lowest heuristic.
+    bool partial() const { return partial_; }
 
-      /// Check if (x, y) is occupied
-      bool isOccupied(int x, int y) const;
-      /// Check if (x, y, z) is occupied
-      bool isOccupied(int x, int y, int z) const;
+    /// Per-plan counters, valid after plan() when built with JPS_PROFILE.
+    struct Stats
+    {
+        long long expand = 0;       ///< nodes popped from the open list
+        long long succ = 0;         ///< successors generated
+        long long jump_steps = 0;   ///< cells stepped through by jump()
+        long long cell_queries = 0; ///< isFree/isOccupied map queries
+        long long heap_push = 0;    ///< open-list insertions
+        // JPS_PHASE_TIMING only: TSC cycles per main-loop phase
+        long long heap_increase = 0; ///< decrease-key (pq_.increase) calls
+        unsigned long long cyc_pop = 0;  ///< pq_.top()+pop()
+        unsigned long long cyc_succ = 0; ///< getSucc/getJpsSucc
+        unsigned long long cyc_proc = 0; ///< successor g-update + heap ops
+    };
+    const Stats &stats() const { return stats_; }
 
-      /// Clculate heuristic
-      double getHeur(int x, int y) const;
-      /// Clculate heuristic
-      double getHeur(int x, int y, int z) const;
+    /// JPS_PHASE_TIMING only: coordinates (search space) of every expanded
+    /// node, in expansion order, from the last plan().
+    const std::vector<Veci<Dim>> &expandTrace() const { return trace_; }
 
-      /// Determine if (x, y) has forced neighbor with direction (dx, dy)
-      bool hasForced(int x, int y, int dx, int dy);
-      /// Determine if (x, y, z) has forced neighbor with direction (dx, dy, dz)
-      bool hasForced(int x, int y, int z, int dx, int dy, int dz);
+    /// Get the states in open set
+    std::vector<StatePtr> getOpenSet() const;
 
-      /// 2D jump, return true iff finding the goal or a jump point
-      bool jump(int x, int y, int dx, int dy, int& new_x, int& new_y);
-      /// 3D jump, return true iff finding the goal or a jump point
-      bool jump(int x, int y, int z, int dx, int dy, int dz, int& new_x, int& new_y, int& new_z);
+    /// Get the states in close set
+    std::vector<StatePtr> getCloseSet() const;
 
-      /// Initialize 2D jps arrays
-      void init2DJps();
+    /// Get the states in hash map
+    std::vector<StatePtr> getAllSet() const;
 
-      const char* cMap_;
-      int xDim_, yDim_, zDim_;
-      double eps_;
-      bool verbose_;
+private:
+    /// Main planning loop
+    bool plan(StatePtr &currNode_ptr, int max_expand, int start_id,
+              int goal_id);
+    /// Get successor function for A*
+    void getSucc(const StatePtr &curr, std::vector<int> &succ_ids,
+                 std::vector<double> &succ_costs);
+    /// Get successor function for JPS
+    void getJpsSucc(const StatePtr &curr, std::vector<int> &succ_ids,
+                    std::vector<double> &succ_costs);
+    /// Recover the optimal path
+    std::vector<StatePtr> recoverPath(StatePtr node, int id);
 
-      const char val_free_ = 0;
-      int xGoal_, yGoal_, zGoal_;
-      bool use_2d_;
-      bool use_jps_ = false;
+    /// Get subscript
+    int coordToId(int x, int y) const;
+    /// Get subscript
+    int coordToId(int x, int y, int z) const;
 
-      priorityQueue pq_;
-      std::vector<StatePtr> hm_;
-      std::vector<bool> seen_;
+    /// Check if (x, y) is free
+    bool isFree(int x, int y) const;
+    /// Check if (x, y, z) is free
+    bool isFree(int x, int y, int z) const;
 
-      std::vector<StatePtr> path_;
+    /// Check if (x, y) is occupied
+    bool isOccupied(int x, int y) const;
+    /// Check if (x, y, z) is occupied
+    bool isOccupied(int x, int y, int z) const;
 
-      std::vector<std::vector<int>> ns_;
-      std::shared_ptr<JPS2DNeib> jn2d_;
-      std::shared_ptr<JPS3DNeib> jn3d_;
- };
-}
+    /// Clculate heuristic
+    double getHeur(int x, int y) const;
+    /// Clculate heuristic
+    double getHeur(int x, int y, int z) const;
+
+    /// Determine if (x, y) has forced neighbor with direction (dx, dy)
+    bool hasForced(int x, int y, int dx, int dy);
+    /// Determine if (x, y, z) has forced neighbor with direction (dx, dy, dz)
+    bool hasForced(int x, int y, int z, int dx, int dy, int dz);
+
+    /// Same as hasForced, but takes the id/norm1 already computed by jump(),
+    /// avoiding recomputing them on every corridor step
+    bool hasForcedWithId(int x, int y, int id, int norm1);
+    /// Same as hasForced, but takes the id/norm1 already computed by jump()
+    bool hasForcedWithId(int x, int y, int z, int id, int norm1);
+
+    /// 2D jump, return true iff finding the goal or a jump point
+    bool jump(int x, int y, int dx, int dy, int &new_x, int &new_y);
+    /// 3D jump, return true iff finding the goal or a jump point
+    bool jump(int x, int y, int z, int dx, int dy, int dz, int &new_x,
+              int &new_y, int &new_z);
+
+    /// Initialize 2D jps arrays
+    void init2DJps();
+
+    std::shared_ptr<MapUtil<Dim, ValueT>> map_util_;
+    int xDim_, yDim_, zDim_;
+    TmapValue thresh_val_ = 0;
+    double eps_;
+    bool verbose_;
+
+    int xGoal_, yGoal_, zGoal_;
+    int goalId_;
+    bool use_2d_;
+    bool use_jps_ = false;
+
+    priorityQueue pq_;
+    std::vector<StatePtr> hm_;
+    std::vector<uint16_t> visited_;
+    uint16_t current_planning_token_ = 0;
+
+    std::vector<StatePtr> path_;
+    mutable Stats stats_;
+    std::vector<Veci<Dim>> trace_;
+    bool partial_ = false;
+
+    const uint8_t *flat_ = nullptr;
+    int bx0_ = 0, by0_ = 0, bz0_ = 0;
+    int bx1_ = 0, by1_ = 0, bz1_ = 0;
+
+    std::vector<std::vector<int>> ns_;
+    /// ns_ as Veci, for MapUtil::freeNeighbors (3D, non-flat A*)
+    std::vector<Veci<Dim>> ns_vec_;
+    std::shared_ptr<JPS2DNeib> jn2d_;
+    std::shared_ptr<JPS3DNeib> jn3d_;
+
+    // Block-pool allocator for State objects. Blocks are never freed --
+    // current_block_idx_/current_slot_idx_ rewind to 0 at the start of every
+    // plan() call, so once the pool reaches the largest search's footprint,
+    // later searches reuse existing blocks with zero new heap allocation.
+    // Safe only because GraphSearch persists across plan() calls (Task 8) --
+    // otherwise the pool would be discarded every time.
+    static constexpr int kStateBlockSize = 10000;
+
+    struct StateBlock
+    {
+        std::vector<State> block;
+        StateBlock() { block.resize(kStateBlockSize); }
+    };
+    std::vector<std::unique_ptr<StateBlock>> state_pool_;
+    int current_block_idx_ = 0;
+    int current_slot_idx_ = 0;
+
+    inline StatePtr getNewState()
+    {
+        if (current_block_idx_ >= (int)state_pool_.size())
+            state_pool_.push_back(std::make_unique<StateBlock>());
+        StatePtr ptr =
+            &state_pool_[current_block_idx_]->block[current_slot_idx_];
+        current_slot_idx_++;
+        if (current_slot_idx_ >= kStateBlockSize)
+        {
+            current_slot_idx_ = 0;
+            current_block_idx_++;
+        }
+        return ptr;
+    }
+
+    inline StatePtr allocateState(int id, int x, int y, int dx, int dy)
+    {
+        StatePtr ptr = getNewState();
+        *ptr = State(id, x, y, dx, dy);
+        return ptr;
+    }
+
+    inline StatePtr allocateState(int id, int x, int y, int z, int dx, int dy,
+                                  int dz)
+    {
+        StatePtr ptr = getNewState();
+        *ptr = State(id, x, y, z, dx, dy, dz);
+        return ptr;
+    }
+};
+} // namespace JPS
 #endif

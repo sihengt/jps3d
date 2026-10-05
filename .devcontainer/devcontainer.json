@@ -1,0 +1,60 @@
+{
+    "name": "ROS 2 Jazzy",
+    "privileged": true,
+    "remoteUser": "${localEnv:USER}",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "args": {
+            "USERNAME": "${localEnv:USER}"
+        }
+    },
+
+    "customizations": {
+        "vscode": {
+            "extensions":[
+                "ms-vscode.cpptools",
+                "ms-vscode.cpptools-themes",
+                "twxs.cmake",
+                "donjayamanne.python-extension-pack",
+                "eamodio.gitlens",
+                "anthropic.claude-code"
+            ]
+        }
+    },
+    "runArgs": [
+            "--gpus", "all",
+            "--runtime=nvidia",
+            "--net=host",
+            "--pid=host",
+            "--ipc=host",
+            "--runtime=nvidia",
+            "--cap-add=SYS_PTRACE",
+            "--security-opt",
+            "seccomp=unconfined",
+            "-e", "DISPLAY=${env:DISPLAY}",
+            "-e", "NVIDIA_VISIBLE_DEVICES=all",
+            "-e", "NVIDIA_DRIVER_CAPABILITIES=all",
+            "-e", "__GLX_VENDOR_LIBRARY_NAME=nvidia"
+        ],
+
+    "containerEnv": {
+        "DISPLAY": "unix:0",
+        "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET",
+        "ROS_DOMAIN_ID": "42",
+        "PX4_ASAN": "",
+        "PX4_MSAN": "",
+        "PX4_TSAN": "",
+        "PX4_UBSAN": ""
+    },
+
+    "mounts": [
+       "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind,consistency=cached",
+       "source=/dev/dri,target=/dev/dri,type=bind,consistency=cached"//,
+    ],
+    "postCreateCommand": "sudo chown -R $(whoami) /home/${localWorkspaceFolderBasename}",
+    
+    "workspaceFolder": "/home/${localWorkspaceFolderBasename}",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/home/${localWorkspaceFolderBasename},type=bind",
+    
+    "initializeCommand": "xhost +local:${containerUser}"
+}   

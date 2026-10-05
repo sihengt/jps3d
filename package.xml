@@ -1,14 +1,30 @@
 <?xml version="1.0"?>
-<package format="2">
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
   <name>jps3d</name>
   <version>1.0.0</version>
-  <description>The jps3d package</description>
-  <maintainer email="sikang@seas.upenn.edu">sikang</maintainer>
+  <description>Forked and adapted jps3d package (from UPenn)</description>
+  <maintainer email="siheng.teng@gmail.com">siheng</maintainer>
 
   <license>BSD-3-Clause</license>
 
-  <export>
-    <build_type>cmake</build_type>
-  </export>
+  <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <depend>rclcpp</depend>
+  <depend>rclpy</depend>
+  <depend>nav_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>octomap_msgs</depend>
+  <depend>octomap</depend>
+  <depend>rog_map</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
 </package>

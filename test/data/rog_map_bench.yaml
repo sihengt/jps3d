@@ -1,0 +1,69 @@
+# ROG-Map config for jps3d's ROGMapUtil tests/benchmarks.
+# Mirrors the user's planner params (astar block is informational only; jps3d
+# does not read it). ESDF resolution is set to the inflation resolution (0.2 m)
+# so the planning grid is 40/0.2 x 40/0.2 x 20/0.2 = 200x200x100 cells.
+super_planner:
+  planning_horizon: 6.0
+  robot_r: 0.2
+
+astar:
+  map_voxel_num: [200, 200, 100]
+  visual_process: false
+  allow_diag: true
+  heu_type: 2
+  debug_visualization_en: false
+
+rog_map:
+  resolution: 0.05
+  inflation_resolution: 0.2
+  inflation_step: 1
+  unk_inflation_en: false
+  unk_inflation_step: 1
+  map_size: [ 40, 40, 20 ]
+  fix_map_origin: [ 0, 0, 10 ]
+  frontier_extraction_en: false
+
+  virtual_ceil_height: 3.0
+  virtual_ground_height: 0
+
+  load_pcd_en: false
+
+  map_sliding:
+    enable: false
+    threshold: 0.3
+
+  esdf:
+    enable: true
+    resolution: 0.05
+    local_update_box: [40, 40, 20]
+
+  ros_callback:
+    enable: false
+    cloud_topic: "/cloud_registered"
+    odom_topic: "/odom"
+    odom_timeout: 2.0
+
+  visualization:
+    enable: false
+    use_dynamic_reconfigure: false
+    time_rate: 0
+    frame_rate: 0
+    range: [ 15, 15, 4 ]
+    frame_id: "map"
+    pub_unknown_map_en: false
+
+  intensity_thresh: -10
+  point_filt_num: 1
+
+  raycasting:
+    enable: false
+    batch_update_size: 1
+    local_update_box: [ 20, 20, 20 ]
+    ray_range: [0.1, 20 ]
+    p_min: 0.12
+    p_miss: 0.49
+    p_free: 0.499
+    p_occ: 0.85
+    p_hit: 0.9
+    p_max: 0.98
+    unk_thresh: 1.0
