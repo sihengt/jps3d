@@ -107,6 +107,10 @@ add_executable(test_planner_optimality test/test_planner_optimality.cpp)
 target_link_libraries(test_planner_optimality jps_lib)
 add_test(test_planner_optimality test_planner_optimality)
 
+add_executable(test_planner_fast_snapshot_endpoints test/test_planner_fast_snapshot_endpoints.cpp)
+target_link_libraries(test_planner_fast_snapshot_endpoints jps_lib)
+add_test(test_planner_fast_snapshot_endpoints test_planner_fast_snapshot_endpoints)
+
 add_executable(test_graph_search_eps_isolation test/test_graph_search_eps_isolation.cpp)
 target_link_libraries(test_graph_search_eps_isolation jps_lib)
 add_test(test_graph_search_eps_isolation test_graph_search_eps_isolation)
@@ -202,6 +206,11 @@ if(JPS3D_WITH_ROG_MAP)
     test/test_rog_map_slide_invariants.cpp src/jps3d_frontend.cpp)
   add_test(test_rog_map_slide_invariants test_rog_map_slide_invariants
     ${CMAKE_SOURCE_DIR}/test/data/rog_map_bench.yaml)
+
+  jps3d_rog_target(test_rog_map_bbox_consistency
+    test/test_rog_map_bbox_consistency.cpp)
+  add_test(test_rog_map_bbox_consistency test_rog_map_bbox_consistency
+    ${CMAKE_SOURCE_DIR}/test/data/rog_map_small_box.yaml)
 
   jps3d_rog_target(bench_jps_rog_map test/bench_jps_rog_map.cpp
     src/jps3d_frontend.cpp)
