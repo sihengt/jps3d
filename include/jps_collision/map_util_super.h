@@ -43,6 +43,31 @@ public:
     using TmapValue = typename MapUtil<Dim, ValueT>::TmapValue;
     using Tmap = typename MapUtil<Dim, ValueT>::Tmap;
 
+    // In 3D, decides between ESDF / Inflation
+    //
+    // Esdf       distance >= thresh_val_, read from the ESDF ring buffer.
+    //            The ESDF is seeded only from prob-map OCCUPIED cells and is
+    //            not inflated, so its free set is larger than the inflation
+    //            map's by (inflation_step * inflation_resolution -
+    //            thresh_val_). To fully incorporate, TODO to make corridor
+    //            generator use the same resolution as ESDF.
+    //
+    // Inflation  !isOccupiedInflate(), same metric corridor generator certifies with, so a
+    //            guide path is free exactly when its consumer agrees.
+    //
+    // The search lattice is the ESDF grid either way; only the predicate
+    // changes. Under Inflation the lattice is finer than the inflation grid
+    // (0.1 m vs 0.2 m), which costs nothing and keeps the index/sliding logic
+    // that Esdf already relies on.
+    enum class Authority
+    {
+        Esdf,
+        Inflation
+    };
+
+    void setAuthority(Authority a) { authority_ = a; }
+    Authority getAuthority() const { return authority_; }
+
     /**
      * @brief Construct a new ROGMapUtil object, sets up ROGMap dim_ to address
      * ROGMap padding, and precomputes cell offsets within nearest_free_search_radius_m_.
@@ -208,6 +233,11 @@ public:
     /// Check if the cell is free by index
     bool isFree(int idx, TmapValue val) override
     {
+        if constexpr (Dim == 3)
+        {
+            if (authority_ == Authority::Inflation)
+                return !map_class_ptr_->isOccupiedInflate(posFromIndex(idx));
+        }
         bool free = map_[idx] >= val;
         if (free) ++g_rog_debug_counters.free_count; else ++g_rog_debug_counters.occupied_count;
         return free;
@@ -218,6 +248,8 @@ public:
     {
         if constexpr (Dim == 3)
         {
+            if (authority_ == Authority::Inflation)
+                return isUnknownAt(posFromIndex(idx));
             return map_class_ptr_->esdfMapIsUnknownByBufferIndex(idx);
         }
         else
@@ -229,6 +261,11 @@ public:
     /// Check if the cell is occupied by index
     bool isOccupied(int idx, TmapValue val) override
     {
+        if constexpr (Dim == 3)
+        {
+            if (authority_ == Authority::Inflation)
+                return map_class_ptr_->isOccupiedInflate(posFromIndex(idx));
+        }
         bool occ = map_[idx] < val;
         if (occ) ++g_rog_debug_counters.occupied_count; else ++g_rog_debug_counters.free_count;
         return occ;
@@ -267,22 +304,35 @@ public:
     {
         if (isOutside(pn))
             return false;
-        else
-            return isFree(getIndex(pn), val);
+        if constexpr (Dim == 3)
+        {
+            if (authority_ == Authority::Inflation)
+                return !map_class_ptr_->isOccupiedInflate(posFromCell(pn));
+        }
+        return isFree(getIndex(pn), val);
     }
     /// Check if the given cell is occupied by coordinate
     bool isOccupied(const Veci<Dim> &pn, TmapValue val) override
     {
         if (isOutside(pn))
             return true;
-        else
-            return isOccupied(getIndex(pn), val);
+        if constexpr (Dim == 3)
+        {
+            if (authority_ == Authority::Inflation)
+                return map_class_ptr_->isOccupiedInflate(posFromCell(pn));
+        }
+        return isOccupied(getIndex(pn), val);
     }
     /// Check if the given cell is unknown by coordinate
     bool isUnknown(const Veci<Dim> &pn) override
     {
         if (isOutside(pn))
             return true;
+        if constexpr (Dim == 3)
+        {
+            if (authority_ == Authority::Inflation)
+                return isUnknownAt(posFromCell(pn));
+        }
         return isUnknown(getIndex(pn));
     }
 
@@ -583,7 +633,10 @@ public:
         else
         {
             const Vec3i one = Vec3i::Ones();
-            if (pn(2) + 1 > virtual_ceiling_id_z_ ||
+            // The ring-buffer shortcut below reads the ESDF directly, so it
+            // does not apply when the inflation map decides free/occupied.
+            if (authority_ == Authority::Inflation ||
+                pn(2) + 1 > virtual_ceiling_id_z_ ||
                 pn(2) - 1 < virtual_floor_id_z_ ||
                 !map_class_ptr_->insideESDFMap(Vec3i(pn - one)) ||
                 !map_class_ptr_->insideESDFMap(Vec3i(pn + one)))
@@ -683,6 +736,42 @@ public:
                 out.assign(total, 1);
             if ((vhi.array() < vlo.array()).any())
                 return;
+            // Under Inflation the ring-buffer sweep does not apply:
+            if (authority_ == Authority::Inflation)
+            {
+                const int ny = n(1), nzs = n(2);
+                for (int x = vlo(0); x <= vhi(0); ++x)
+                {
+                    for (int y = vlo(1); y <= vhi(1); ++y)
+                    {
+                        Vecf<3> pos;
+                        map_class_ptr_->esdfMapGlobalIndexToPos(
+                            Vec3i(x, y, vlo(2)), pos);
+                        uint8_t *col =
+                            out.data() +
+                            (static_cast<size_t>(x - lo(0)) * ny + (y - lo(1))) *
+                                nzs +
+                            (vlo(2) - lo(2));
+                        Vec3i prev_inf_id = Vec3i::Constant(
+                            std::numeric_limits<int>::min());
+                        uint8_t prev_val = 0;
+                        for (int z = vlo(2); z <= vhi(2); ++z, pos.z() += res_)
+                        {
+                            Vec3i inf_id;
+                            map_class_ptr_->infMapPosToGlobalIndex(pos, inf_id);
+                            if (inf_id != prev_inf_id)
+                            {
+                                prev_val =
+                                    map_class_ptr_->isOccupiedInflate(pos) ? 1
+                                                                           : 0;
+                                prev_inf_id = inf_id;
+                            }
+                            col[z - vlo(2)] = prev_val;
+                        }
+                    }
+                }
+                return;
+            }
             const Vec3i half = (dim_ - Vec3i::Ones()) / 2;
             // Global index -> ring-buffer coordinate in [0, dim)
             // (rog_map SlidingMap::globalIndexToLocalIndex, shifted by half)
@@ -768,6 +857,31 @@ public:
     const Tmap &map_;
 
 protected:
+    /// ESDF ring-buffer index -> world position of that cell's centre.
+    Vecf<3> posFromIndex(int idx) const
+    {
+        Vecf<3> pos;
+        map_class_ptr_->getESDFPosFromHashIndex(idx, pos);
+        return pos;
+    }
+
+    /// ESDF global cell index -> world position of that cell's centre.
+    Vecf<3> posFromCell(const Veci<3> &pn) const
+    {
+        Vecf<3> pos;
+        map_class_ptr_->esdfMapGlobalIndexToPos(pn, pos);
+        return pos;
+    }
+
+    // Has this cell been observed? Current only consumer is getNearestKnownFreePos()
+    // which wants known-free start/goal seeds.
+    bool isUnknownAt(const Vecf<3> &pos) const
+    {
+        return map_class_ptr_->getGridType(pos) == rog_map::GridType::UNKNOWN;
+    }
+
+    /// Which representation decides free/occupied -- see Authority.
+    Authority authority_ = Authority::Esdf;
     /// Resolution
     decimal_t res_;
     /// Origin, float type
