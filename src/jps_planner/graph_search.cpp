@@ -987,10 +987,10 @@ template <int Dim, typename ValueT>
 std::vector<StatePtr> GraphSearch<Dim, ValueT>::getAllSet() const
 {
     std::vector<StatePtr> ss;
-    for (const auto &it : hm_)
+    for (size_t i = 0; i < hm_.size(); ++i)
     {
-        if (it)
-            ss.push_back(it);
+        if (visited_[i] == current_planning_token_ && hm_[i])
+            ss.push_back(hm_[i]);
     }
     return ss;
 }
