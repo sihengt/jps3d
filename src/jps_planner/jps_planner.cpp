@@ -1,8 +1,8 @@
-#include <jps_basis/timer.hpp>
 #include <cstdlib>
 #include <iostream>
-#include <string>
+#include <jps_basis/timer.hpp>
 #include <jps_planner/jps_planner/jps_planner.h>
+#include <string>
 
 template <int Dim, typename ValueT>
 JPSPlanner<Dim, ValueT>::JPSPlanner(bool verbose) : planner_verbose_(verbose)
@@ -34,19 +34,22 @@ template <int Dim, typename ValueT> void JPSPlanner<Dim, ValueT>::updateMap()
     // lo / hi -= map_util_-> lo_d / hi_d
 
     // (The former full-map copy into cmap_ was never read; removed.)
-    if (!fast_mode_ || !map_util_)
+    if (!map_util_)
         return;
     JPS::Timer t(true);
     map_util_->updateVirtualCeilingFloor();
-    
+
+    if (!fast_mode_)
+        return;
+
     // get map bounds and convert into voxel coords
     Vecf<Dim> lo_d, hi_d;
     map_util_->getLocalMapBound(lo_d, hi_d);
     Veci<Dim> lo = map_util_->floatToInt(lo_d);
     Veci<Dim> hi = map_util_->floatToInt(hi_d);
-    
 
-    // increases low / decreases hi until the integer values fail "isOutside()" check.
+    // increases low / decreases hi until the integer values fail "isOutside()"
+    // check.
     auto trim = [&](int i)
     {
         const Veci<Dim> mid = (lo + hi) / 2;
@@ -239,7 +242,8 @@ bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start,
     if (fast_mode_ && occ_.empty())
     {
         if (planner_verbose_)
-            printf(ANSI_COLOR_RED "fast mode: call updateMap() first!\n" ANSI_COLOR_RESET);
+            printf(ANSI_COLOR_RED
+                   "fast mode: call updateMap() first!\n" ANSI_COLOR_RESET);
         status_ = -1;
         return false;
     }
@@ -294,7 +298,8 @@ bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start,
     {
         start_l -= snap_lo_;
         goal_l -= snap_lo_;
-        if ((start_l.array() < 0).any() || (start_l.array() >= dim.array()).any())
+        if ((start_l.array() < 0).any() ||
+            (start_l.array() >= dim.array()).any())
         {
             status_ = 1;
             return false;
@@ -309,27 +314,32 @@ bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start,
         const auto snapId = [&](const Veci<Dim> &p)
         {
             if constexpr (Dim == 3)
-                return (static_cast<size_t>(p(0)) * dim(1) + p(1)) * dim(2) + p(2);
+                return (static_cast<size_t>(p(0)) * dim(1) + p(1)) * dim(2) +
+                       p(2);
             else
-                return static_cast<size_t>(p(0)) + static_cast<size_t>(dim(0)) * p(1);
+                return static_cast<size_t>(p(0)) +
+                       static_cast<size_t>(dim(0)) * p(1);
         };
         if (occ_[snapId(start_l)])
         {
             if (planner_verbose_)
-                printf(ANSI_COLOR_RED "start is blocked in the snapshot!\n" ANSI_COLOR_RESET);
+                printf(ANSI_COLOR_RED
+                       "start is blocked in the snapshot!\n" ANSI_COLOR_RESET);
             status_ = 1;
             return false;
         }
         if (occ_[snapId(goal_l)])
         {
             if (planner_verbose_)
-                printf(ANSI_COLOR_RED "goal is blocked in the snapshot!\n" ANSI_COLOR_RESET);
+                printf(ANSI_COLOR_RED
+                       "goal is blocked in the snapshot!\n" ANSI_COLOR_RESET);
             status_ = 2;
             return false;
         }
     }
 
-    // Check if dimensions have changed - if so, create a new graph_search_ with new dimensions and map_util_
+    // Check if dimensions have changed - if so, create a new graph_search_ with
+    // new dimensions and map_util_
     bool dims_changed;
     if (Dim == 3)
         dims_changed = dim(0) != graph_search_dim_x_ ||
