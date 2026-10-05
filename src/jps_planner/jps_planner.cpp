@@ -287,15 +287,6 @@ bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start,
     
     // TODO: validate bounds check for fast_mode_
     const Veci<Dim> dim = fast_mode_ ? snap_dim_ : map_util_->getDim();
-    const bool jps_debug_dim = [] {
-        const char *e = std::getenv("JPS_DEBUG_DIM");
-        return e && std::string(e) == "1";
-    }();
-    if (jps_debug_dim)
-        std::cout << "[JPS_DEBUG_DIM] fast_mode=" << fast_mode_
-                  << " dim=" << dim.transpose()
-                  << " snap_dim_=" << snap_dim_.transpose()
-                  << " full_dim=" << map_util_->getDim().transpose() << std::endl;
     Veci<Dim> start_l = start_int, goal_l = goal_int;
     if (fast_mode_)
     {

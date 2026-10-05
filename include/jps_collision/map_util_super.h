@@ -16,20 +16,6 @@
 
 namespace JPS
 {
-// Temporary diagnostic counters for isOutside()/isFree() outcomes on the
-// live (non-snapshot) ROGMapUtil query path. Guarded by JPS_DEBUG_DIM at the
-// print site in jps_planner.cpp; increment cost is negligible next to the
-// live-path's existing per-query overhead.
-struct RogDebugCounters
-{
-    long long reject_ceiling_floor = 0;
-    long long reject_inside_esdf = 0;
-    long long inside_ok = 0;
-    long long free_count = 0;
-    long long occupied_count = 0;
-};
-inline RogDebugCounters g_rog_debug_counters;
-
 /**
  * @brief MapUtil implementation for collision checking with rog_map::ROGMap
  * @param Dim is workspace dimension
@@ -138,6 +124,10 @@ public:
         std::sort(sorted_neighbors_.begin(), sorted_neighbors_.end(),
                   [](const Veci<Dim> &a, const Veci<Dim> &b)
                   { return a.squaredNorm() < b.squaredNorm(); });
+
+        // Without this the cached ceiling/floor z indices are 0 and isOutside()
+        // rejects every cell but z = 0 until the caller refreshes them.
+        updateVirtualCeilingFloor();
     }
 
     /// Refresh the virtual ceiling/floor as ESDF global z indices from the
@@ -151,20 +141,17 @@ public:
         {
             virtual_ceiling_ = map_class_ptr_->getVirtualCeilingHeight();
             virtual_floor_ = map_class_ptr_->getVirtualFloorHeight();
-            
-            // Once per run:
-            // posToGlobalIndex converts each axis independently to a global index.
-            // Global index is an absolute lattice coordinate, independent of sliding.
-            if (!virtual_ceiling_floor_set_)
-            {
-                Vec3i ceil_id, floor_id;
-                map_class_ptr_->esdfMapPosToGlobalIndex(
-                    Vec3f(0, 0, virtual_ceiling_), ceil_id);
-                map_class_ptr_->esdfMapPosToGlobalIndex(Vec3f(0, 0, virtual_floor_),
-                                                        floor_id);
-                virtual_ceiling_id_z_ = ceil_id.z();
-                virtual_floor_id_z_ = floor_id.z();
-            }
+
+            // posToGlobalIndex converts each axis independently to a global
+            // index, which is an absolute lattice coordinate independent of
+            // sliding, so only z matters here.
+            Vec3i ceil_id, floor_id;
+            map_class_ptr_->esdfMapPosToGlobalIndex(
+                Vec3f(0, 0, virtual_ceiling_), ceil_id);
+            map_class_ptr_->esdfMapPosToGlobalIndex(Vec3f(0, 0, virtual_floor_),
+                                                    floor_id);
+            virtual_ceiling_id_z_ = ceil_id.z();
+            virtual_floor_id_z_ = floor_id.z();
 
             // caches ESDF bbox current id for bounds checks
             // used for other things too, keep alive for now.
@@ -238,9 +225,7 @@ public:
             if (authority_ == Authority::Inflation)
                 return !map_class_ptr_->isOccupiedInflate(posFromIndex(idx));
         }
-        bool free = map_[idx] >= val;
-        if (free) ++g_rog_debug_counters.free_count; else ++g_rog_debug_counters.occupied_count;
-        return free;
+        return map_[idx] >= val;
     } // Implicit assumption that unknown is free
     /// Check if the cell is unknown by index
     ///  Query unknown status from occupancy state instead of dist value
@@ -266,9 +251,7 @@ public:
             if (authority_ == Authority::Inflation)
                 return map_class_ptr_->isOccupiedInflate(posFromIndex(idx));
         }
-        bool occ = map_[idx] < val;
-        if (occ) ++g_rog_debug_counters.occupied_count; else ++g_rog_debug_counters.free_count;
-        return occ;
+        return map_[idx] < val;
     }
     /// Check if the cell is outside by coordinate
     bool isOutside(const Veci<Dim> &pn) override
@@ -278,23 +261,16 @@ public:
             // pn is an ESDF global index, check its z directly.
             // outside of virtual ceiling or floor
             if (pn(2) > virtual_ceiling_id_z_ || pn(2) < virtual_floor_id_z_)
-            {
-                ++g_rog_debug_counters.reject_ceiling_floor;
                 return true;
-            }
             // not inside ESDF map
             if (!map_class_ptr_->insideESDFMap(pn))
-            {
-                ++g_rog_debug_counters.reject_inside_esdf;
                 return true;
-            }
 
             // TODO: I disagree with this check, i believe we should still
             // search outside of the updated bbox.
             // if ((pn.array() < updated_bbox_min_id_.array()).any() ||
             //     (pn.array() > updated_bbox_max_id_.array()).any())
             //     return true;
-            ++g_rog_debug_counters.inside_ok;
             return false;
         }
         return false;
@@ -899,8 +875,8 @@ protected:
     std::shared_ptr<rog_map::ROGMap> map_class_ptr_;
     decimal_t virtual_ceiling_ = 4;
     decimal_t virtual_floor_ = -1;
-    /// Virtual ceiling/floor as ESDF global z indices (precomputed in ctor)
-    bool virtual_ceiling_floor_set_ = false;
+    /// Virtual ceiling/floor as ESDF global z indices; set in the ctor and
+    /// refreshed by updateVirtualCeilingFloor()
     int virtual_ceiling_id_z_ = 0;
     int virtual_floor_id_z_ = 0;
     /// ESDF actually-updated bbox as global indices, refreshed each plan()

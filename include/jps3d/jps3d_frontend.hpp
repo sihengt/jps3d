@@ -65,8 +65,8 @@ public:
         return planner_->lastTimings();
     }
 
-    /// Temporary Diagnostic-only accessor to the underlying planner
-    /// used to A/B the live query path against the fast-mode snapshot.
+#ifdef JPS_PROFILE
+    /// Benchmark-only accessors (compiled out unless JPS_PROFILE is defined).
     const std::shared_ptr<JPSPlanner3D> &debugPlanner() const
     {
         return planner_;
@@ -75,6 +75,7 @@ public:
     {
         return map_util_;
     }
+#endif
 
 private:
     std::shared_ptr<JPS::MapUtil<3>> map_util_;

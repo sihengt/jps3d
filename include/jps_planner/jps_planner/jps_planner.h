@@ -96,17 +96,17 @@ public:
     bool fastMode() const { return fast_mode_; }
     /// Time spent building the last snapshot (ms).
     double lastSnapshotMs() const { return snapshot_ms_; }
-    /// Diagnostic accessors for the last fast-mode snapshot (temporary --
-    /// used to A/B the live query path against the snapshot it was built
-    /// from, see docs/perf investigation).
+#ifdef JPS_PROFILE
+    /// Benchmark-only accessors (compiled out unless JPS_PROFILE is defined,
+    /// which only the JPS3D_WITH_ROG_MAP benches do).
     const std::vector<uint8_t> &debugSnapshot() const { return occ_; }
     Veci<Dim> debugSnapLo() const { return snap_lo_; }
     Veci<Dim> debugSnapDim() const { return snap_dim_; }
-    /// Diagnostic: the persistent graph search (null before first plan()).
     const std::shared_ptr<JPS::GraphSearch<Dim, ValueT>> &debugGraphSearch() const
     {
         return graph_search_;
     }
+#endif
 
     /// Restrict plan() to the inclusive cell box [lo, hi] (global cell
     /// indices, as returned by MapUtil::floatToInt). Fast mode only.

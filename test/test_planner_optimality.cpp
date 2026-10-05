@@ -15,6 +15,7 @@
 // Also checks that every returned path is actually traversable, that a
 // persisted GraphSearch (reused across plan() calls, as the node does) agrees
 // with a fresh one, and that JPS never fails where A* succeeds.
+#include <jps_collision/map_util_voxel.h>
 #include <jps_planner/jps_planner/graph_search.h>
 
 #include <algorithm>
@@ -30,7 +31,7 @@ namespace
 struct Grid
 {
     int X, Y, Z;
-    std::vector<char> cells;
+    std::vector<signed char> cells;
     bool occupied(int x, int y, int z) const
     {
         return cells[x + y * X + z * X * Y] != 0;
@@ -39,7 +40,7 @@ struct Grid
 
 Grid randomGrid(std::mt19937 &rng, int X, int Y, int Z, double density)
 {
-    Grid g{X, Y, Z, std::vector<char>((size_t)X * Y * Z, 0)};
+    Grid g{X, Y, Z, std::vector<signed char>((size_t)X * Y * Z, 0)};
     std::uniform_int_distribution<int> ux(0, X - 1), uy(0, Y - 1), uz(0, Z - 1);
     std::uniform_int_distribution<int> box(1, 4);
     const int target = (int)(density * X * Y * Z);
@@ -58,6 +59,14 @@ Grid randomGrid(std::mt19937 &rng, int X, int Y, int Z, double density)
                     }
     }
     return g;
+}
+
+/// Build a GraphSearch over g through a SimpleMapUtil, the way JPSPlanner does.
+GraphSearch<3> makeSearch(const Grid &g)
+{
+    auto mu = std::make_shared<SimpleMapUtil<3>>();
+    mu->setMap(Vec3f::Zero(), Vec3i(g.X, g.Y, g.Z), g.cells, 1.0);
+    return GraphSearch<3>(mu, g.X, g.Y, g.Z, 1.0, false);
 }
 
 /// Walk the waypoint path cell by cell: every segment must be a straight
@@ -122,10 +131,10 @@ int main()
         if (g.occupied(sx, sy, sz) || g.occupied(gx, gy, gz))
             continue;
 
-        GraphSearch astar(g.cells.data(), X, Y, Z, 1.0, false);
+        GraphSearch<3> astar = makeSearch(g);
         const bool a_ok = astar.plan(sx, sy, sz, gx, gy, gz, false, -1);
 
-        GraphSearch jps(g.cells.data(), X, Y, Z, 1.0, false);
+        GraphSearch<3> jps = makeSearch(g);
         const bool j_ok = jps.plan(sx, sy, sz, gx, gy, gz, true, -1);
 
         if (!a_ok)
@@ -168,7 +177,7 @@ int main()
         }
 
         // A GraphSearch reused across plan() calls must match a fresh one.
-        GraphSearch reused(g.cells.data(), X, Y, Z, 1.0, false);
+        GraphSearch<3> reused = makeSearch(g);
         reused.plan(gx, gy, gz, sx, sy, sz, true, -1); // warm the pool first
         if (reused.plan(sx, sy, sz, gx, gy, gz, true, -1) != j_ok ||
             std::fabs(reused.getPath().front()->g - j_cost) > 1e-9)

@@ -281,29 +281,7 @@ Result runCase(Jps3dFrontend &fe, JPSPlanner3D::Timings (*tim)(Jps3dFrontend &),
     Timer t(true);
     if (per_cycle_update)
         fe.updateMap();
-    const bool dbg = std::getenv("JPS_DEBUG_DIM") &&
-                     std::string(std::getenv("JPS_DEBUG_DIM")) == "1";
-    if (dbg)
-        JPS::g_rog_debug_counters = JPS::RogDebugCounters();
     r.ok = fe.planPath(c.start, c.goal, a.eps, a.jps, path);
-    if (dbg)
-    {
-        const auto &cnt = JPS::g_rog_debug_counters;
-        printf("[JPS_DEBUG_DIM] isOutside: ceil_floor_reject=%lld inside_esdf_reject=%lld "
-               "inside_ok=%lld | free=%lld occupied=%lld\n",
-               cnt.reject_ceiling_floor, cnt.reject_inside_esdf, cnt.inside_ok,
-               cnt.free_count, cnt.occupied_count);
-        // Spatial extent of every distinct cell the search touched (hm_ with
-        // a non-null state), vs. the direct start->goal line -- tells us
-        // whether the search stayed local to the path or flooded the map.
-        const auto close = fe.debugPlanner()->getAllSet();
-        Vec3f mn = Vec3f::Constant(1e18), mx = Vec3f::Constant(-1e18);
-        for (auto &p : close) { mn = mn.cwiseMin(p); mx = mx.cwiseMax(p); }
-        printf("[JPS_DEBUG_DIM] allSet: n=%zu bbox_min=%.2f %.2f %.2f bbox_max=%.2f %.2f %.2f "
-               "start=%.2f %.2f %.2f goal=%.2f %.2f %.2f\n",
-               close.size(), mn(0), mn(1), mn(2), mx(0), mx(1), mx(2),
-               c.start(0), c.start(1), c.start(2), c.goal(0), c.goal(1), c.goal(2));
-    }
     r.first_ms = t.ElapsedMs();
     r.len = r.ok ? pathLength(path) : 0;
     r.attempts = fe.lastAttempts();
