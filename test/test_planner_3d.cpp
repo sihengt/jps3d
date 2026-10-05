@@ -3,7 +3,7 @@
 #include <jps_planner/jps_planner/jps_planner.h>
 
 #include "read_map.hpp"
-#include "timer.hpp"
+#include <jps_basis/timer.hpp>
 
 using namespace JPS;
 

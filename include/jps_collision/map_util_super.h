@@ -25,6 +25,10 @@ namespace JPS
 template <int Dim, typename ValueT = double>
 class ROGMapUtil final : public MapUtil<Dim, ValueT>
 {
+    // rog_map is a 3D map: the 2D branches below only exist so the template
+    // body parses, and index out of bounds if ever used. Fail at compile time.
+    static_assert(Dim == 3, "ROGMapUtil only supports Dim == 3");
+
 public:
     using TmapValue = typename MapUtil<Dim, ValueT>::TmapValue;
     using Tmap = typename MapUtil<Dim, ValueT>::Tmap;
@@ -266,11 +270,13 @@ public:
             if (!map_class_ptr_->insideESDFMap(pn))
                 return true;
 
-            // TODO: I disagree with this check, i believe we should still
-            // search outside of the updated bbox.
-            // if ((pn.array() < updated_bbox_min_id_.array()).any() ||
-            //     (pn.array() > updated_bbox_max_id_.array()).any())
-            //     return true;
+            // Outside the ESDF's updated bbox the distance values are not
+            // recomputed, so treat them as blocked. snapshotOccupancy() and
+            // the snapshot box (getLocalMapBound()) use the same bbox, which
+            // keeps fast and live mode in agreement.
+            if ((pn.array() < updated_bbox_min_id_.array()).any() ||
+                (pn.array() > updated_bbox_max_id_.array()).any())
+                return true;
             return false;
         }
         return false;
@@ -894,8 +900,6 @@ protected:
     /// (precomputed once in the ctor, used by getNearestKnownFreePos())
     vec_Veci<Dim> sorted_neighbors_;
 };
-
-typedef ROGMapUtil<2> ROG2DMapUtil;
 
 typedef ROGMapUtil<3> ROG3DmapUtil;
 

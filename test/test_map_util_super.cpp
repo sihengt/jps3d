@@ -1,7 +1,7 @@
 // Correctness gate for JPS::ROGMapUtil over a real rog_map::ROGMap.
 // Usage: test_map_util_super <rog_map_bench.yaml>
 #include "rog_map_fixture.hpp"
-#include "timer.hpp"
+#include <jps_basis/timer.hpp>
 
 #include <jps3d/jps3d_frontend.hpp>
 

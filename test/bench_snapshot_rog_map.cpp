@@ -6,7 +6,7 @@
 // snapshot against the generic per-cell isFree() sweep
 // (MapUtil<3>::snapshotOccupancy) as ground truth.
 #include "rog_map_fixture.hpp"
-#include "timer.hpp"
+#include <jps_basis/timer.hpp>
 
 #include <jps_planner/jps_planner/jps_planner.h>
 

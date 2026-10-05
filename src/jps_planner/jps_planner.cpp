@@ -1,4 +1,4 @@
-#include "../../test/timer.hpp"
+#include <jps_basis/timer.hpp>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -236,8 +236,18 @@ bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start,
     timings_ = Timings();
     JPS::Timer t_total(true), t_phase(true);
 
+    if (fast_mode_ && occ_.empty())
+    {
+        if (planner_verbose_)
+            printf(ANSI_COLOR_RED "fast mode: call updateMap() first!\n" ANSI_COLOR_RESET);
+        status_ = -1;
+        return false;
+    }
+
+    // In fast mode the search runs on the snapshot, so start and goal are
+    // checked against it below instead of the live map.
     const Veci<Dim> start_int = map_util_->floatToInt(start);
-    if (!map_util_->isFree(start_int, thresh_val_))
+    if (!fast_mode_ && !map_util_->isFree(start_int, thresh_val_))
     {
         if (planner_verbose_)
         {
@@ -261,7 +271,7 @@ bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start,
 
     // Early exits if the goal index is not free
     const Veci<Dim> goal_int = map_util_->floatToInt(goal);
-    if (!map_util_->isFree(goal_int, thresh_val_))
+    if (!fast_mode_ && !map_util_->isFree(goal_int, thresh_val_))
     {
         if (planner_verbose_)
             printf(ANSI_COLOR_RED "goal is not free!\n" ANSI_COLOR_RESET);
@@ -277,14 +287,6 @@ bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start,
     // it if the map dimensions changed since it was last built.
     JPS::Timer time_search(true);
 
-    if (fast_mode_ && occ_.empty())
-    {
-        if (planner_verbose_)
-            printf(ANSI_COLOR_RED "fast mode: call updateMap() first!\n" ANSI_COLOR_RESET);
-        status_ = -1;
-        return false;
-    }
-    
     // TODO: validate bounds check for fast_mode_
     const Veci<Dim> dim = fast_mode_ ? snap_dim_ : map_util_->getDim();
     Veci<Dim> start_l = start_int, goal_l = goal_int;
@@ -299,6 +301,29 @@ bool JPSPlanner<Dim, ValueT>::plan(const Vecf<Dim> &start,
         }
         if ((goal_l.array() < 0).any() || (goal_l.array() >= dim.array()).any())
         {
+            status_ = 2;
+            return false;
+        }
+        // Snapshot layout: 3D z-fastest, 2D x-fastest (see
+        // MapUtil::snapshotOccupancy).
+        const auto snapId = [&](const Veci<Dim> &p)
+        {
+            if constexpr (Dim == 3)
+                return (static_cast<size_t>(p(0)) * dim(1) + p(1)) * dim(2) + p(2);
+            else
+                return static_cast<size_t>(p(0)) + static_cast<size_t>(dim(0)) * p(1);
+        };
+        if (occ_[snapId(start_l)])
+        {
+            if (planner_verbose_)
+                printf(ANSI_COLOR_RED "start is blocked in the snapshot!\n" ANSI_COLOR_RESET);
+            status_ = 1;
+            return false;
+        }
+        if (occ_[snapId(goal_l)])
+        {
+            if (planner_verbose_)
+                printf(ANSI_COLOR_RED "goal is blocked in the snapshot!\n" ANSI_COLOR_RESET);
             status_ = 2;
             return false;
         }

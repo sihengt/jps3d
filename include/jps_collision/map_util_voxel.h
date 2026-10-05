@@ -31,9 +31,6 @@ public:
     /// Simple constructor
     SimpleMapUtil() {}
 
-    /// A static array-backed map never slides, so there's nothing to refresh.
-    void updateVirtualCeilingFloor() override {}
-
     /// Get map data
     Tmap getMap() override { return map_; }
     /// Get resolution

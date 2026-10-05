@@ -16,7 +16,7 @@
 //   adapted to draw obstacles from the scene's point cloud directly instead
 //   of looping the whole (much larger, 3D) occupancy grid.
 #include "rog_map_fixture.hpp"
-#include "timer.hpp"
+#include <jps_basis/timer.hpp>
 
 #include <jps3d/jps3d_frontend.hpp>
 #include <jps_collision/map_util_voxel.h>

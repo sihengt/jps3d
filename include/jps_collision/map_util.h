@@ -28,10 +28,10 @@ public:
 
     virtual ~MapUtil() = default;
 
-    // Refresh the virtual ceiling/floor and any other state that depends on
-    // the map having possibly slid. Must be called whenever the map may
-    // have slid (i.e. at the start of every plan()).
-    virtual void updateVirtualCeilingFloor() = 0;
+    // Refresh any state that depends on the map having possibly slid (e.g.
+    // ROGMapUtil's virtual ceiling/floor). Called at the start of every
+    // plan(). Static backends have nothing to refresh, hence the no-op default.
+    virtual void updateVirtualCeilingFloor() {}
 
     /// Get map data
     virtual Tmap getMap() = 0;

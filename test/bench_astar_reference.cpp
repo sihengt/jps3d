@@ -14,7 +14,7 @@
 //               (a coarse cell is blocked if any fine cell in it is blocked;
 //               0.2 m is the resolution SUPER's own A* plans at)
 #include "rog_map_fixture.hpp"
-#include "timer.hpp"
+#include <jps_basis/timer.hpp>
 
 #include <jps_planner/jps_planner/jps_planner.h>
 

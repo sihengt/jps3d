@@ -3,7 +3,7 @@ build*/
 .worktrees/
 install/
 log/
-*.svg
+docs/**/*.svg
 *.pyc
 super_planner/
 build_rog*/
