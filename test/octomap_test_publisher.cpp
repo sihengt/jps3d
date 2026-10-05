@@ -24,11 +24,8 @@ int main(int argc, char **argv)
             for (int z = 0; z < 5; ++z)
                 tree.updateNode(
                     octomap::point3d(x + 0.5, y + 0.5, z + 0.5), false);
-    // Wall at x=2 across all y, blocking z=0,1. The +1 floatToInt boundary
-    // bleed (see OctomapMapUtil::updateFromOctree) extends the topmost
-    // occupied leaf (z=1, world [1.0,2.0]) up into z=2 as well, so the
-    // actually-occupied region ends up z=0..2 -- leaving z=3 and z=4 both
-    // genuinely free, a 2-cell buffer robust to the bleed.
+    // Wall at x=2 across all y, blocking z=0,1 -- leaving z=2..4 free to
+    // fly over (before inflation).
     for (int y = 0; y < 5; ++y)
         for (int z = 0; z < 2; ++z)
             tree.updateNode(octomap::point3d(2.5, y + 0.5, z + 0.5), true);

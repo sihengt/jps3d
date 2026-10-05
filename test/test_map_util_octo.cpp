@@ -1,7 +1,126 @@
 #include <jps_collision/map_util_octo.h>
+#include <jps_collision/map_util_voxel.h>
 #include <octomap/octomap.h>
+#include <random>
 
 using namespace JPS;
+
+/// Load the same random free/occupied/unknown grid into an OctomapMapUtil and
+/// a SimpleMapUtil, apply the same ceiling and dilation, and check that every
+/// MapUtil query agrees. Guards OctomapMapUtil's standalone reimplementation
+/// of the dense-grid queries against drifting from SimpleMapUtil.
+template <int Dim> bool parityCheck(unsigned seed)
+{
+    std::mt19937 rng(seed);
+    Veci<Dim> dim;
+    Vecf<Dim> origin;
+    for (int i = 0; i < Dim; ++i)
+    {
+        dim(i) = 7 + 2 * i;
+        origin(i) = -1.25 + 0.7 * i;
+    }
+    const decimal_t res = 0.5;
+
+    size_t n = 1;
+    for (int i = 0; i < Dim; ++i)
+        n *= dim(i);
+    std::vector<signed char> data(n);
+    std::uniform_int_distribution<int> pick(0, 99);
+    for (auto &c : data)
+    {
+        const int r = pick(rng);
+        c = r < 10 ? 100 : (r < 30 ? -1 : 0); // 10% occ, 20% unknown
+    }
+
+    OctomapMapUtil<Dim> octo;
+    SimpleMapUtil<Dim> simple;
+    octo.setMap(origin, dim, data, res);
+    simple.setMap(origin, dim, data, res);
+    const decimal_t ceiling_z = origin(Dim - 1) + (dim(Dim - 1) - 2) * res;
+    octo.setCeiling(ceiling_z);
+    simple.setCeiling(ceiling_z);
+    octo.dilateByRadius(1);
+    simple.dilateByRadius(1);
+
+    bool ok = true;
+    auto fail = [&](const char *what)
+    {
+        printf(ANSI_COLOR_RED "FAILED: %dD parity mismatch in %s\n"
+                              ANSI_COLOR_RESET,
+               Dim, what);
+        ok = false;
+    };
+
+    if (octo.getMap() != simple.getMap())
+        fail("getMap");
+    if (octo.getCloud() != simple.getCloud())
+        fail("getCloud");
+    if (octo.getFreeCloud() != simple.getFreeCloud())
+        fail("getFreeCloud");
+    if (octo.getUnknownCloud() != simple.getUnknownCloud())
+        fail("getUnknownCloud");
+
+    // Every cell plus a one-cell ring outside the window.
+    Veci<Dim> pn;
+    const decimal_t thresh = octo.getThreshDist();
+    auto checkCell = [&]()
+    {
+        if (octo.isOutside(pn) != simple.isOutside(pn))
+            fail("isOutside");
+        if (octo.isFree(pn, thresh) != simple.isFree(pn, thresh))
+            fail("isFree");
+        if (octo.isOccupied(pn, thresh) != simple.isOccupied(pn, thresh))
+            fail("isOccupied");
+        if (octo.isUnknown(pn) != simple.isUnknown(pn))
+            fail("isUnknown");
+    };
+    if constexpr (Dim == 3)
+    {
+        for (pn(0) = -1; pn(0) <= dim(0); ++pn(0))
+            for (pn(1) = -1; pn(1) <= dim(1); ++pn(1))
+                for (pn(2) = -1; pn(2) <= dim(2); ++pn(2))
+                    checkCell();
+    }
+    else
+    {
+        for (pn(0) = -1; pn(0) <= dim(0); ++pn(0))
+            for (pn(1) = -1; pn(1) <= dim(1); ++pn(1))
+                checkCell();
+    }
+
+    // Random world points (some outside the window) for the float queries.
+    Vecf<Dim> lo_w, hi_w;
+    simple.getLocalMapBound(lo_w, hi_w);
+    std::uniform_real_distribution<decimal_t> unit(-0.1, 1.1);
+    auto randPt = [&]()
+    {
+        Vecf<Dim> p;
+        for (int i = 0; i < Dim; ++i)
+            p(i) = lo_w(i) + unit(rng) * (hi_w(i) - lo_w(i));
+        return p;
+    };
+    for (int t = 0; t < 200; ++t)
+    {
+        const Vecf<Dim> a = randPt(), b = randPt();
+        if (octo.floatToInt(a) != simple.floatToInt(a))
+            fail("floatToInt");
+        if (octo.rayTrace(a, b) != simple.rayTrace(a, b))
+            fail("rayTrace");
+        if (octo.isBlocked(a, b) != simple.isBlocked(a, b))
+            fail("isBlocked");
+        Vecf<Dim> ho = Vecf<Dim>::Zero(), hs = Vecf<Dim>::Zero();
+        const bool io = octo.lineIntersectMapBound(a, b, ho);
+        const bool is = simple.lineIntersectMapBound(a, b, hs);
+        if (io != is || (io && ho != hs))
+            fail("lineIntersectMapBound");
+        Vecf<Dim> no = Vecf<Dim>::Zero(), ns = Vecf<Dim>::Zero();
+        const bool fo = octo.getNearestKnownFreePos(a, no);
+        const bool fs = simple.getNearestKnownFreePos(a, ns);
+        if (fo != fs || (fo && no != ns))
+            fail("getNearestKnownFreePos");
+    }
+    return ok;
+}
 
 int main()
 {
@@ -18,15 +137,12 @@ int main()
 
     bool all_ok = true;
 
-    // Octree at the SAME 1m resolution as the grid. floatToInt uses
-    // round((pt-origin)/res - 0.5), so a 1m leaf's true extent can map to a
-    // 2-cell-wide index range at these boundaries (e.g. [1.0,2.0] -> indices
-    // {1,2}, not just {1}) -- keep the occupied and free leaves far enough
-    // apart that their rounded index ranges don't touch, or "occupied wins"
-    // would make the free assertion below fail.
+    // Octree at the SAME 1m resolution as the grid: each leaf is aligned to
+    // exactly one grid cell and must mark only that cell -- its +x/+y/+z
+    // faces sit on the neighbors' boundaries but must not spill into them.
     octomap::OcTree tree(1.0);
-    tree.updateNode(octomap::point3d(1.5, 1.5, 1.5), true);  // occupied: world [1.0,2.0]^3 -> cells {1,2}^3
-    tree.updateNode(octomap::point3d(3.5, 3.5, 3.5), false); // free: world [3.0,4.0]^3 -> cell (3,3,3) (4 is outside dim=4, clipped)
+    tree.updateNode(octomap::point3d(1.5, 1.5, 1.5), true);  // occupied: world [1.0,2.0)^3 -> cell (1,1,1)
+    tree.updateNode(octomap::point3d(3.5, 3.5, 3.5), false); // free: world [3.0,4.0)^3 -> cell (3,3,3)
 
     map_util.updateFromOctree(&tree);
 
@@ -47,9 +163,24 @@ int main()
         all_ok = false;
     }
 
+    // Boundary neighbors of the two leaves must stay untouched (unknown).
+    const Vec3i untouched[6] = {Vec3i(2, 1, 1), Vec3i(1, 2, 1),
+                                Vec3i(1, 1, 2), Vec3i(2, 2, 2),
+                                Vec3i(2, 3, 3), Vec3i(3, 3, 2)};
+    for (const auto &c : untouched)
+    {
+        if (!map_util.isUnknown(c))
+        {
+            printf(ANSI_COLOR_RED
+                   "FAILED: (%d,%d,%d) only touches a leaf face, should stay "
+                   "unknown\n" ANSI_COLOR_RESET,
+                   c(0), c(1), c(2));
+            all_ok = false;
+        }
+    }
+
     // A cell the octree never touched stays unknown, but is still treated
-    // as free by isFree() (optimistic search) -- the same single-grid
-    // duality SimpleMapUtil already provides.
+    // as free by isFree() (optimistic search).
     if (!map_util.isUnknown(Vec3i(0, 0, 0)))
     {
         printf(ANSI_COLOR_RED
@@ -67,12 +198,8 @@ int main()
 
     // A coarser leaf spanning multiple grid cells: reset with a fresh 2m
     // octree. A single leaf at (1,1,1) with a 2m edge covers world
-    // [0,2]^3, which floatToInt maps to (at least) grid cells {0,1}^3 --
-    // this checks that every one of those 8 cells got marked, i.e. one
-    // coarse leaf really did fan out over multiple grid cells (it may
-    // also reach a couple of index-2 neighbors at the rounding boundary;
-    // this test only asserts the cells it must cover, not the ones it
-    // must not).
+    // [0,2)^3, which must mark exactly grid cells {0,1}^3 -- every one of
+    // those 8 cells, and none of the index-2 cells its faces touch.
     octomap::OcTree coarse_tree(2.0);
     coarse_tree.updateNode(octomap::point3d(1.0, 1.0, 1.0), true);
 
@@ -94,6 +221,27 @@ int main()
                    c(0), c(1), c(2));
             all_ok = false;
         }
+    }
+    const Vec3i beyond[4] = {Vec3i(2, 0, 0), Vec3i(0, 2, 0), Vec3i(0, 0, 2),
+                             Vec3i(2, 2, 2)};
+    for (const auto &c : beyond)
+    {
+        if (!map_util.isUnknown(c))
+        {
+            printf(ANSI_COLOR_RED
+                   "FAILED: coarse leaf should not reach grid cell "
+                   "(%d,%d,%d)\n" ANSI_COLOR_RESET,
+                   c(0), c(1), c(2));
+            all_ok = false;
+        }
+    }
+
+    for (unsigned seed = 1; seed <= 5; ++seed)
+    {
+        if (!parityCheck<3>(seed))
+            all_ok = false;
+        if (!parityCheck<2>(seed))
+            all_ok = false;
     }
 
     if (!all_ok)
