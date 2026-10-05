@@ -9,8 +9,6 @@ constexpr double SQRT2 = 1.41421356237309504880;
 constexpr double SQRT3 = 1.73205080756887729353;
 } // namespace
 
-double JPS::g_heur_weight = 1.0;
-
 template <int Dim, typename ValueT>
 GraphSearch<Dim, ValueT>::GraphSearch(
     const std::shared_ptr<MapUtil<Dim, ValueT>> &map_util, int xDim, int yDim,
@@ -18,7 +16,6 @@ GraphSearch<Dim, ValueT>::GraphSearch(
     : map_util_(map_util), xDim_(xDim), yDim_(yDim), zDim_(1), eps_(eps),
       verbose_(verbose)
 {
-    g_heur_weight = eps_;
     hm_.resize(xDim_ * yDim_, nullptr);
     visited_.resize(xDim_ * yDim_, 0);
     setSearchBox(Veci<Dim>(), Veci<Dim>(), false);
@@ -43,7 +40,6 @@ GraphSearch<Dim, ValueT>::GraphSearch(
     : map_util_(map_util), xDim_(xDim), yDim_(yDim), zDim_(zDim), eps_(eps),
       verbose_(verbose)
 {
-    g_heur_weight = eps_;
     hm_.resize(static_cast<size_t>(xDim_) * yDim_ * zDim_, nullptr);
     visited_.resize(static_cast<size_t>(xDim_) * yDim_ * zDim_, 0);
     setSearchBox(Veci<Dim>(), Veci<Dim>(), false);
@@ -309,7 +305,7 @@ bool GraphSearch<Dim, ValueT>::plan(StatePtr &currNode_ptr, int maxExpand,
     partial_ = false;
     StatePtr best_h_ptr = currNode_ptr; // lowest-h expanded node, for D
     // Insert start node
-    currNode_ptr->f = compare_state<StatePtr>::fval(currNode_ptr);
+    currNode_ptr->f = compare_state<StatePtr>::fval(currNode_ptr, eps_);
     currNode_ptr->heapkey = pq_.push(currNode_ptr);
     JPS_STAT(stats_.heap_push++);
     currNode_ptr->opened = true;
@@ -372,7 +368,7 @@ bool GraphSearch<Dim, ValueT>::plan(StatePtr &currNode_ptr, int maxExpand,
             {
                 child_ptr->parentId = currNode_ptr->id; // Assign new parent
                 child_ptr->g = tentative_gval;          // Update gval
-                child_ptr->f = compare_state<StatePtr>::fval(child_ptr);
+                child_ptr->f = compare_state<StatePtr>::fval(child_ptr, eps_);
 
                 // double fval = child_ptr->g + child_ptr->h;
 

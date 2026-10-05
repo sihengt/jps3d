@@ -36,11 +36,6 @@
 
 namespace JPS
 {
-// Heuristic weight used by compare_state's piecewise f-value below.
-// Set from GraphSearch::eps_ (via setEps()/ctor) since compare_state is a
-// free struct with no access to the owning GraphSearch instance.
-extern double g_heur_weight;
-
 /// Heap element comparison
 template <class T> struct compare_state
 {
@@ -50,10 +45,10 @@ template <class T> struct compare_state
     // Degrades to plain weighted-A* (f = g + w*h) when h > g dominates
     // near the goal, while staying closer to Dijkstra-consistent
     // ordering away from the goal where h <= g. a->h is the raw
-    // (unweighted) heuristic; w comes from the active search's eps_.
-    static double fval(const T &a)
+    // (unweighted) heuristic; w is the owning GraphSearch's eps_.
+    static double fval(const T &a, double w)
     {
-        double g = a->g, h = a->h, w = g_heur_weight;
+        double g = a->g, h = a->h;
         return (h > g) ? (g + h) : ((g + (2.0 * w - 1.0) * h) / w);
     }
 
@@ -238,7 +233,6 @@ public:
     void setEps(double eps)
     {
         eps_ = eps;
-        g_heur_weight = eps;
     }
 
     /**

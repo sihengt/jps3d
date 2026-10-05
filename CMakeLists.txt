@@ -107,6 +107,10 @@ add_executable(test_planner_optimality test/test_planner_optimality.cpp)
 target_link_libraries(test_planner_optimality jps_lib)
 add_test(test_planner_optimality test_planner_optimality)
 
+add_executable(test_graph_search_eps_isolation test/test_graph_search_eps_isolation.cpp)
+target_link_libraries(test_graph_search_eps_isolation jps_lib)
+add_test(test_graph_search_eps_isolation test_graph_search_eps_isolation)
+
 add_executable(test_planner_ceiling test/test_planner_ceiling.cpp)
 target_link_libraries(test_planner_ceiling jps_lib ${YAMLCPP_LIBRARIES})
 add_test(test_planner_ceiling test_planner_ceiling ${CMAKE_SOURCE_DIR}/data/simple3d.yaml)
